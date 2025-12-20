@@ -125,16 +125,22 @@ struct MediaViewerView: View {
     private var pagingContent: some View {
         TabView(selection: $currentIndex) {
             ForEach(Array(assets.enumerated()), id: \.element.id) { index, asset in
-                if !trashService.isTrashed(asset.id) {
-                    MediaPageView(
-                        asset: asset,
-                        isCurrentPage: index == currentIndex
-                    )
-                    .swipeToTrash(isEnabled: true) {
-                        trashItem(at: index)
+                Group {
+                    if trashService.isTrashed(asset.id) {
+                        // Keep page to maintain stable indices; render transparent
+                        Color.clear
+                    } else {
+                        MediaPageView(
+                            asset: asset,
+                            isCurrentPage: index == currentIndex
+                        )
+                        .swipeToTrash(isEnabled: true) {
+                            trashItem(at: index)
+                        }
                     }
-                    .tag(index)
                 }
+                .tag(index)
+                .allowsHitTesting(!trashService.isTrashed(asset.id))
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
@@ -234,6 +240,9 @@ struct MediaViewerView: View {
                 Text("Swipe left/right to browse")
                     .font(Typography.subheadline)
                     .foregroundStyle(.white)
+                Text("Swipe up to move to Trash")
+                    .font(Typography.caption1)
+                    .foregroundStyle(.white.opacity(0.8))
             }
             .padding(Spacing.lg)
             .background(.black.opacity(0.7))
@@ -261,10 +270,10 @@ struct MediaViewerView: View {
                 Spacer()
                 
                 VStack(spacing: Spacing.xs) {
-                    Image(systemName: "arrow.down")
+                    Image(systemName: "arrow.up")
                         .font(.system(size: 18, weight: .medium))
                         .foregroundStyle(.white)
-                    Text("Tip: Swipe down to move to Trash")
+                    Text("Tip: Swipe up to move to Trash")
                         .font(Typography.caption1)
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)

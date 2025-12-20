@@ -14,6 +14,10 @@ struct SCleanApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
+                .transaction { txn in
+                    // Reduce flicker on theme change
+                    txn.disablesAnimations = true
+                }
                 .preferredColorScheme(AppearanceMode.from(raw: storedAppearance).colorScheme)
         }
     }

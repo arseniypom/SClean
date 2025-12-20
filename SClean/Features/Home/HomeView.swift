@@ -45,7 +45,7 @@ struct HomeView: View {
                     } label: {
                         Image(systemName: "gearshape")
                             .font(.system(size: 18, weight: .medium))
-                            .foregroundStyle(Color.scPrimary)
+                            .foregroundStyle(Color.scTextPrimary)
                     }
                 }
             }
@@ -153,6 +153,12 @@ struct HomeView: View {
                         .padding(.horizontal, Spacing.md)
                         .padding(.top, Spacing.xxs)
                 }
+
+                // Spacer to avoid overlay by floating refresh button
+                if canRefresh {
+                    Color.clear
+                        .frame(height: 96)
+                }
             }
             .padding(.vertical, Spacing.sm)
         }
@@ -186,11 +192,11 @@ struct HomeView: View {
         Group {
             if isRefreshing {
                 ProgressView()
-                    .tint(.scPrimary)
+                    .tint(.scTextPrimary)
             } else {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(Color.scPrimary)
+                    .foregroundStyle(Color.scTextPrimary)
             }
         }
         .frame(width: 56, height: 56)

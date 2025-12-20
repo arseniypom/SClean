@@ -202,4 +202,3 @@ struct YearGridView: View {
         YearGridView(year: 2024, itemCount: 100, permissionService: permissionService)
     }
 }
-

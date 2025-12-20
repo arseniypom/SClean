@@ -2,7 +2,7 @@
 //  SwipeToTrashModifier.swift
 //  SClean
 //
-//  Swipe-down gesture to move items to trash
+//  Swipe-up gesture to move items to trash
 //
 
 import SwiftUI
@@ -14,15 +14,15 @@ struct SwipeToTrashModifier: ViewModifier {
     @State private var dragOffset: CGFloat = 0
     @State private var isDragging = false
     
-    /// Threshold distance to commit trash action
-    private let trashThreshold: CGFloat = 120
+    /// Threshold distance to commit trash action (balanced to avoid conflicts)
+    private let trashThreshold: CGFloat = 90
     
     /// Maximum visual offset
     private let maxOffset: CGFloat = 200
     
     /// Progress toward trash (0 to 1)
     private var trashProgress: CGFloat {
-        min(1.0, dragOffset / trashThreshold)
+        min(1.0, abs(dragOffset) / trashThreshold)
     }
     
     func body(content: Content) -> some View {
@@ -32,14 +32,12 @@ struct SwipeToTrashModifier: ViewModifier {
                 .scaleEffect(1 - (trashProgress * 0.05)) // Subtle shrink
             
             // Trash indicator overlay
-            if isDragging && dragOffset > 20 {
+            if isDragging && abs(dragOffset) > 24 {
                 trashIndicator
                     .opacity(Double(trashProgress))
             }
         }
-        .gesture(
-            isEnabled ? trashGesture : nil
-        )
+        .simultaneousGesture(isEnabled ? trashGesture : nil)
     }
     
     // MARK: - Trash Indicator
@@ -68,10 +66,13 @@ struct SwipeToTrashModifier: ViewModifier {
     // MARK: - Gesture
     
     private var trashGesture: some Gesture {
-        DragGesture(minimumDistance: 20)
+        DragGesture(minimumDistance: 16)
             .onChanged { value in
-                // Only respond to downward drags
-                guard value.translation.height > 0 else {
+                // Only respond primarily to upward drags; allow small horizontal drift
+                let dy = value.translation.height
+                let dx = abs(value.translation.width)
+                // Require clear vertical intent to avoid stealing horizontal swipes
+                guard dy < -12, abs(dy) > (dx + 10) else {
                     dragOffset = 0
                     isDragging = false
                     return
@@ -80,19 +81,19 @@ struct SwipeToTrashModifier: ViewModifier {
                 isDragging = true
                 
                 // Apply resistance after threshold
-                let translation = value.translation.height
+                let translation = -dy // positive magnitude for upward drag
                 if translation < trashThreshold {
-                    dragOffset = translation
+                    dragOffset = -translation
                 } else {
                     // Rubber-band effect past threshold
                     let overflow = translation - trashThreshold
-                    dragOffset = trashThreshold + (overflow * 0.3)
+                    dragOffset = -(trashThreshold + (overflow * 0.3))
                 }
                 
-                dragOffset = min(dragOffset, maxOffset)
+                dragOffset = max(dragOffset, -maxOffset)
             }
             .onEnded { value in
-                let shouldTrash = dragOffset >= trashThreshold
+                let shouldTrash = abs(dragOffset) >= trashThreshold
                 
                 if shouldTrash {
                     // Haptic feedback
@@ -101,7 +102,7 @@ struct SwipeToTrashModifier: ViewModifier {
                     
                     // Animate out
                     withAnimation(.easeOut(duration: AnimationDuration.fast)) {
-                        dragOffset = maxOffset + 100
+                        dragOffset = -(maxOffset + 100)
                     }
                     
                     // Trigger trash after animation
@@ -143,4 +144,3 @@ extension View {
             }
     }
 }
-

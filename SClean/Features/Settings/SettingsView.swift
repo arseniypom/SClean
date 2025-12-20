@@ -50,17 +50,7 @@ struct SettingsView: View {
                     // Appearance card
                     AppearancePicker()
                     
-                    // Placeholder for future settings
-                    VStack(alignment: .leading, spacing: Spacing.xs) {
-                        Text("About")
-                            .font(Typography.subheadline)
-                            .foregroundStyle(Color.scTextSecondary)
-                        Text("SClean helps you review and clean your photo library.")
-                            .font(Typography.body)
-                            .foregroundStyle(Color.scTextPrimary)
-                    }
-                    .padding(Spacing.md)
-                    .scCardStyle()
+                    // Additional settings can go here
                 }
                 .padding(.horizontal, Spacing.md)
                 .padding(.vertical, Spacing.sm)

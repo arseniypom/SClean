@@ -59,7 +59,7 @@ struct TrashView: View {
                         toggleSelectionMode()
                     }
                     .font(Typography.subheadline)
-                    .foregroundStyle(Color.scPrimary)
+                    .foregroundStyle(Color.scTextPrimary)
                 }
             }
         }
@@ -347,7 +347,7 @@ struct TrashViewWithNavigation: View {
                         toggleSelectionMode()
                     }
                     .font(Typography.subheadline)
-                    .foregroundStyle(Color.scPrimary)
+                    .foregroundStyle(Color.scTextPrimary)
                 }
             }
         }
