@@ -158,6 +158,7 @@ private struct ButtonBackgroundModifier: ViewModifier {
 
 // MARK: - Year Card
 
+/// Year card with button action
 struct YearCard: View {
     let year: Int
     let count: Int
@@ -165,12 +166,18 @@ struct YearCard: View {
     
     var body: some View {
         Button(action: action) {
-            cardContent
+            YearCardContent(year: year, count: count)
         }
         .buttonStyle(.plain)
     }
+}
+
+/// Year card content (for use with NavigationLink or Button)
+struct YearCardContent: View {
+    let year: Int
+    let count: Int
     
-    private var cardContent: some View {
+    var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: Spacing.xxs) {
                 Text(String(year))

@@ -121,9 +121,16 @@ struct HomeView: View {
                 
                 // Year cards
                 ForEach(years) { bucket in
-                    YearCard(year: bucket.year, count: bucket.count) {
-                        // TODO: Navigate to year grid (Step 2)
+                    NavigationLink {
+                        YearGridView(
+                            year: bucket.year,
+                            itemCount: bucket.count,
+                            permissionService: permissionService
+                        )
+                    } label: {
+                        YearCardContent(year: bucket.year, count: bucket.count)
                     }
+                    .buttonStyle(.plain)
                     .padding(.horizontal, Spacing.md)
                 }
             }
