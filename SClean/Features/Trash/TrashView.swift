@@ -28,8 +28,18 @@ struct TrashView: View {
         ZStack {
             Color.scBackground
                 .ignoresSafeArea()
-            
-            if trashService.trashCount == 0 {
+
+            if !permissionService.status.canAccessPhotos {
+                // Access changed state with single clear action
+                EmptyStateView(
+                    icon: "lock.fill",
+                    title: "Access Changed",
+                    message: "Photo access was changed. Re-enable it in Settings to manage Trash.",
+                    actionTitle: "Open Settings"
+                ) {
+                    permissionService.openSettings()
+                }
+            } else if trashService.trashCount == 0 {
                 emptyState
             } else {
                 content
@@ -121,7 +131,7 @@ struct TrashView: View {
             Text("Nothing is deleted until you Empty Trash")
                 .font(Typography.caption1)
                 .foregroundStyle(Color.scTextSecondary)
-            
+
             Text("\(trashService.trashCount) \(trashService.trashCount == 1 ? "item" : "items")")
                 .font(Typography.caption2)
                 .foregroundStyle(Color.scTextDisabled)
@@ -650,4 +660,3 @@ struct TrashViewWithNavigation: View {
         TrashViewWithNavigation(permissionService: PhotoPermissionService())
     }
 }
-

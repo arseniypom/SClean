@@ -9,9 +9,12 @@ import SwiftUI
 
 @main
 struct SCleanApp: App {
+    @AppStorage(AppearanceMode.storageKey) private var storedAppearance: String = AppearanceMode.system.rawValue
+    
     var body: some Scene {
         WindowGroup {
             RootView()
+                .preferredColorScheme(AppearanceMode.from(raw: storedAppearance).colorScheme)
         }
     }
 }

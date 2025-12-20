@@ -145,6 +145,13 @@ struct HomeView: View {
                     .buttonStyle(.plain)
                     .padding(.horizontal, Spacing.md)
                     .padding(.top, Spacing.sm)
+
+                    // Trust messaging near Trash card
+                    Text("Nothing is deleted until you Empty Trash")
+                        .font(Typography.caption2)
+                        .foregroundStyle(Color.scTextDisabled)
+                        .padding(.horizontal, Spacing.md)
+                        .padding(.top, Spacing.xxs)
                 }
             }
             .padding(.vertical, Spacing.sm)
@@ -205,4 +212,3 @@ private extension HomeView {
     let service = PhotoPermissionService()
     return HomeView(permissionService: service)
 }
-

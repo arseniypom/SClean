@@ -59,9 +59,14 @@ struct MediaPageView: View {
                 .aspectRatio(contentMode: .fit)
                 .transition(.opacity.animation(.easeIn(duration: AnimationDuration.fast)))
         } else if isLoading {
-            ProgressView()
-                .tint(.white)
-                .scaleEffect(1.2)
+            VStack(spacing: Spacing.md) {
+                ProgressView()
+                    .tint(.white)
+                    .scaleEffect(1.2)
+                Text("Loading…")
+                    .font(Typography.caption1)
+                    .foregroundStyle(.white.opacity(0.8))
+            }
         } else if hasError {
             errorView
         }
@@ -94,11 +99,16 @@ struct MediaPageView: View {
             Image(systemName: "photo")
                 .font(.system(size: 48, weight: .light))
                 .foregroundStyle(.white.opacity(0.5))
-            
-            Text("Unable to load")
+
+            Text("Can't load right now")
                 .font(Typography.body)
+                .foregroundStyle(.white.opacity(0.8))
+
+            Text("Swipe to skip")
+                .font(Typography.caption1)
                 .foregroundStyle(.white.opacity(0.7))
         }
+        .accessibilityLabel("Can't load this item. Swipe to skip.")
     }
     
     // MARK: - Image Loading
@@ -140,4 +150,3 @@ struct MediaPageView: View {
         isCurrentPage: true
     )
 }
-

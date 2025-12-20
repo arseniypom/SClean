@@ -116,9 +116,9 @@ struct DeletionResultView: View {
     
     private var message: String {
         if result.isFullSuccess {
-            return "All \(result.deletedCount) \(result.deletedCount == 1 ? "item was" : "items were") deleted."
+            return "Trash emptied. You can recover items in Photos → Recently Deleted for a limited time."
         } else if result.isPartialSuccess {
-            return "Deleted \(result.deletedCount) \(result.deletedCount == 1 ? "item" : "items").\n\(result.failedIDs.count) \(result.failedIDs.count == 1 ? "item" : "items") couldn't be deleted."
+            return "Deleted \(result.deletedCount). \(result.failedIDs.count) couldn't be deleted. Review remaining items."
         } else if result.error == .userCancelled {
             return "You cancelled the deletion."
         } else {
@@ -236,4 +236,3 @@ struct DeletionResultView: View {
     )
     .background(Color.scBackground)
 }
-

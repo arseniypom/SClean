@@ -35,9 +35,14 @@ struct VideoPlayerView: View {
                 // Play button overlay
                 playButton
             } else if isLoading {
-                ProgressView()
-                    .tint(.white)
-                    .scaleEffect(1.2)
+                VStack(spacing: Spacing.md) {
+                    ProgressView()
+                        .tint(.white)
+                        .scaleEffect(1.2)
+                    Text("Loading…")
+                        .font(Typography.caption1)
+                        .foregroundStyle(.white.opacity(0.8))
+                }
             } else if hasError {
                 errorView
             }
@@ -178,4 +183,3 @@ struct VideoPlayerView: View {
 #Preview {
     VideoPlayerView(assetID: "test-video-id")
 }
-

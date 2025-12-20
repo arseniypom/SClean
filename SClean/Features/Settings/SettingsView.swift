@@ -10,15 +10,61 @@
 
 import SwiftUI
 
+private struct AppearancePicker: View {
+    @AppStorage(AppearanceMode.storageKey) private var storedAppearance: String = AppearanceMode.system.rawValue
+    
+    private var selectionBinding: Binding<AppearanceMode> {
+        Binding<AppearanceMode>(
+            get: { AppearanceMode.from(raw: storedAppearance) },
+            set: { storedAppearance = $0.rawValue }
+        )
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Appearance")
+                .font(Typography.subheadline)
+                .foregroundStyle(Color.scTextSecondary)
+            
+            Picker("Appearance", selection: selectionBinding) {
+                ForEach(AppearanceMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+        .padding(Spacing.md)
+        .scCardStyle()
+        .accessibilityLabel("Appearance")
+    }
+}
+
 struct SettingsView: View {
     var body: some View {
         ZStack {
             Color.scBackground
                 .ignoresSafeArea()
             
-            Text("Settings coming soon")
-                .font(Typography.body)
-                .foregroundStyle(Color.scTextSecondary)
+            ScrollView {
+                VStack(spacing: Spacing.sm) {
+                    // Appearance card
+                    AppearancePicker()
+                    
+                    // Placeholder for future settings
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        Text("About")
+                            .font(Typography.subheadline)
+                            .foregroundStyle(Color.scTextSecondary)
+                        Text("SClean helps you review and clean your photo library.")
+                            .font(Typography.body)
+                            .foregroundStyle(Color.scTextPrimary)
+                    }
+                    .padding(Spacing.md)
+                    .scCardStyle()
+                }
+                .padding(.horizontal, Spacing.md)
+                .padding(.vertical, Spacing.sm)
+            }
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
@@ -31,4 +77,3 @@ struct SettingsView: View {
         SettingsView()
     }
 }
-

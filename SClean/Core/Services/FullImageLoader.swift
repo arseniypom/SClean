@@ -18,7 +18,7 @@ final class FullImageLoader {
     
     // Simple in-memory cache for recently loaded images
     private var cache: [String: UIImage] = [:]
-    private let maxCacheSize = 5
+    private let maxCacheSize = 9
     private var cacheOrder: [String] = []
     
     private init() {
@@ -105,4 +105,3 @@ final class FullImageLoader {
         }
     }
 }
-
