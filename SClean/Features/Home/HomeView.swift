@@ -10,6 +10,7 @@ import SwiftUI
 struct HomeView: View {
     @ObservedObject var permissionService: PhotoPermissionService
     @StateObject private var libraryService = PhotoLibraryService()
+    @StateObject private var trashService = TrashService.shared
     
     @State private var hasAppeared = false
     @State private var cachedYears: [YearBucket] = []
@@ -132,6 +133,18 @@ struct HomeView: View {
                     }
                     .buttonStyle(.plain)
                     .padding(.horizontal, Spacing.md)
+                }
+                
+                // Trash card (only show if there are trashed items)
+                if trashService.trashCount > 0 {
+                    NavigationLink {
+                        TrashViewWithNavigation(permissionService: permissionService)
+                    } label: {
+                        TrashCardContent(count: trashService.trashCount)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.top, Spacing.sm)
                 }
             }
             .padding(.vertical, Spacing.sm)

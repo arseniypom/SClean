@@ -8,6 +8,23 @@
 import SwiftUI
 import Combine
 
+// MARK: - Trashed Item
+
+/// Represents an item in the trash with timestamp for ordering
+struct TrashedItem: Codable, Equatable, Identifiable {
+    let assetID: String
+    let trashedAt: Date
+    
+    var id: String { assetID }
+    
+    init(assetID: String, trashedAt: Date = Date()) {
+        self.assetID = assetID
+        self.trashedAt = trashedAt
+    }
+}
+
+// MARK: - Trash Service
+
 /// Manages the in-app Trash - items marked for deletion but not yet permanently removed
 @MainActor
 final class TrashService: ObservableObject {
@@ -15,16 +32,29 @@ final class TrashService: ObservableObject {
     /// Shared instance
     static let shared = TrashService()
     
-    /// Set of trashed asset IDs
-    @Published private(set) var trashedIDs: Set<String> = []
+    /// All trashed items (ordered by trashedAt, newest first)
+    @Published private(set) var trashedItems: [TrashedItem] = []
     
     /// Last trashed item (for undo)
     @Published private(set) var lastTrashedID: String?
     
     /// Total count of trashed items
-    var trashCount: Int { trashedIDs.count }
+    var trashCount: Int { trashedItems.count }
     
-    private let userDefaultsKey = "SClean.trashedAssetIDs"
+    /// Set of trashed IDs for fast lookup
+    var trashedIDs: Set<String> {
+        Set(trashedItems.map(\.assetID))
+    }
+    
+    /// Ordered list of trashed asset IDs (newest first)
+    var orderedTrashedIDs: [String] {
+        trashedItems.map(\.assetID)
+    }
+    
+    private let userDefaultsKey = "SClean.trashedItems"
+    
+    // Legacy key for migration
+    private let legacyUserDefaultsKey = "SClean.trashedAssetIDs"
     
     private init() {
         loadFromStorage()
@@ -34,15 +64,29 @@ final class TrashService: ObservableObject {
     
     /// Move an asset to trash
     func trash(_ assetID: String) {
-        trashedIDs.insert(assetID)
+        // Don't add duplicates
+        guard !isTrashed(assetID) else { return }
+        
+        let item = TrashedItem(assetID: assetID)
+        // Insert at beginning (newest first)
+        trashedItems.insert(item, at: 0)
         lastTrashedID = assetID
         saveToStorage()
     }
     
     /// Restore an asset from trash
     func restore(_ assetID: String) {
-        trashedIDs.remove(assetID)
+        trashedItems.removeAll { $0.assetID == assetID }
         if lastTrashedID == assetID {
+            lastTrashedID = nil
+        }
+        saveToStorage()
+    }
+    
+    /// Restore multiple assets from trash
+    func restoreMultiple(_ assetIDs: Set<String>) {
+        trashedItems.removeAll { assetIDs.contains($0.assetID) }
+        if let lastID = lastTrashedID, assetIDs.contains(lastID) {
             lastTrashedID = nil
         }
         saveToStorage()
@@ -56,19 +100,24 @@ final class TrashService: ObservableObject {
     
     /// Check if an asset is in trash
     func isTrashed(_ assetID: String) -> Bool {
-        trashedIDs.contains(assetID)
+        trashedItems.contains { $0.assetID == assetID }
+    }
+    
+    /// Get trashed item by ID
+    func trashedItem(for assetID: String) -> TrashedItem? {
+        trashedItems.first { $0.assetID == assetID }
     }
     
     /// Clear all items from trash (used after permanent deletion)
     func clearAll() {
-        trashedIDs.removeAll()
+        trashedItems.removeAll()
         lastTrashedID = nil
         saveToStorage()
     }
     
-    /// Remove specific IDs from trash (e.g., after permanent deletion)
+    /// Remove specific IDs from trash (e.g., after permanent deletion or cleanup)
     func remove(_ assetIDs: Set<String>) {
-        trashedIDs.subtract(assetIDs)
+        trashedItems.removeAll { assetIDs.contains($0.assetID) }
         if let lastID = lastTrashedID, assetIDs.contains(lastID) {
             lastTrashedID = nil
         }
@@ -77,22 +126,36 @@ final class TrashService: ObservableObject {
     
     /// Filter assets to only include non-trashed items
     func filterVisible(_ assets: [YearAsset]) -> [YearAsset] {
-        assets.filter { !isTrashed($0.id) }
+        let trashedSet = trashedIDs
+        return assets.filter { !trashedSet.contains($0.id) }
     }
     
     // MARK: - Persistence
     
     private func loadFromStorage() {
+        // Try loading new format first
         if let data = UserDefaults.standard.data(forKey: userDefaultsKey),
+           let items = try? JSONDecoder().decode([TrashedItem].self, from: data) {
+            trashedItems = items
+            return
+        }
+        
+        // Migrate from legacy format (Set<String>)
+        if let data = UserDefaults.standard.data(forKey: legacyUserDefaultsKey),
            let ids = try? JSONDecoder().decode(Set<String>.self, from: data) {
-            trashedIDs = ids
+            // Convert to new format with current timestamp
+            let now = Date()
+            trashedItems = ids.map { TrashedItem(assetID: $0, trashedAt: now) }
+            // Save in new format
+            saveToStorage()
+            // Remove legacy data
+            UserDefaults.standard.removeObject(forKey: legacyUserDefaultsKey)
         }
     }
     
     private func saveToStorage() {
-        if let data = try? JSONEncoder().encode(trashedIDs) {
+        if let data = try? JSONEncoder().encode(trashedItems) {
             UserDefaults.standard.set(data, forKey: userDefaultsKey)
         }
     }
 }
-

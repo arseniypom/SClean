@@ -140,7 +140,8 @@ struct YearGridView: View {
                             MediaViewerView(
                                 assets: assets,
                                 startIndex: index,
-                                year: year
+                                year: year,
+                                permissionService: permissionService
                             )
                         } label: {
                             gridCell(for: asset)

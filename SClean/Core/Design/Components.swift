@@ -207,6 +207,53 @@ struct YearCardContent: View {
     }
 }
 
+// MARK: - Trash Card
+
+/// Trash card content (for use with NavigationLink)
+struct TrashCardContent: View {
+    let count: Int
+    
+    var body: some View {
+        HStack(spacing: Spacing.sm) {
+            // Trash icon with accent background
+            ZStack {
+                Circle()
+                    .fill(Color.scAccent.opacity(0.15))
+                    .frame(width: 44, height: 44)
+                
+                Image(systemName: "trash")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(Color.scAccent)
+            }
+            
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                Text("Trash")
+                    .font(Typography.title3)
+                    .foregroundStyle(Color.scTextPrimary)
+                
+                Text(countText)
+                    .font(Typography.subheadline)
+                    .foregroundStyle(Color.scTextSecondary)
+            }
+            
+            Spacer()
+            
+            Image(systemName: "chevron.right")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Color.scTextDisabled)
+        }
+        .padding(Spacing.md)
+        .scCardStyle()
+    }
+    
+    private var countText: String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        let formattedCount = formatter.string(from: NSNumber(value: count)) ?? "\(count)"
+        return "\(formattedCount) \(count == 1 ? "item" : "items") to review"
+    }
+}
+
 // MARK: - Empty State
 
 struct EmptyStateView: View {

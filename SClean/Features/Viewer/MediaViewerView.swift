@@ -11,6 +11,7 @@ struct MediaViewerView: View {
     let assets: [YearAsset]
     let startIndex: Int
     let year: Int
+    @ObservedObject var permissionService: PhotoPermissionService
     
     @StateObject private var trashService = TrashService.shared
     @State private var currentIndex: Int
@@ -35,10 +36,11 @@ struct MediaViewerView: View {
         return visibleAssets.firstIndex(where: { $0.id == currentAsset.id }) ?? 0
     }
     
-    init(assets: [YearAsset], startIndex: Int, year: Int) {
+    init(assets: [YearAsset], startIndex: Int, year: Int, permissionService: PhotoPermissionService) {
         self.assets = assets
         self.startIndex = startIndex
         self.year = year
+        self.permissionService = permissionService
         self._currentIndex = State(initialValue: startIndex)
         self._hasSeenHint = State(initialValue: UserDefaults.standard.bool(forKey: "SClean.hasSeenTrashHint"))
     }
@@ -169,10 +171,23 @@ struct MediaViewerView: View {
                         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
                 }
                 
+                // Go to Trash button
                 if trashService.trashCount > 0 {
-                    Text("\(trashService.trashCount) items in Trash")
-                        .font(Typography.caption1)
-                        .foregroundStyle(.white.opacity(0.5))
+                    NavigationLink {
+                        TrashViewWithNavigation(permissionService: permissionService)
+                    } label: {
+                        HStack(spacing: Spacing.xs) {
+                            Image(systemName: "trash")
+                                .font(.system(size: 14, weight: .medium))
+                            Text("Go to Trash (\(trashService.trashCount))")
+                                .font(Typography.headline)
+                        }
+                        .foregroundStyle(Color.scAccent)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, Spacing.md)
+                        .background(Color.scAccent.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
+                    }
                 }
             }
             .padding(.horizontal, Spacing.xxl)
@@ -325,6 +340,11 @@ struct MediaViewerView: View {
     ]
     
     return NavigationStack {
-        MediaViewerView(assets: sampleAssets, startIndex: 0, year: 2024)
+        MediaViewerView(
+            assets: sampleAssets,
+            startIndex: 0,
+            year: 2024,
+            permissionService: PhotoPermissionService()
+        )
     }
 }
