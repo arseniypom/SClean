@@ -286,9 +286,17 @@ struct TrashView: View {
 struct TrashViewWithNavigation: View {
     @ObservedObject var permissionService: PhotoPermissionService
     @StateObject private var trashService = TrashService.shared
+    @StateObject private var deletionService = DeletionService.shared
+    
     @State private var isSelectionMode = false
     @State private var selectedIDs: Set<String> = []
     @State private var hasCheckedAvailability = false
+    
+    // Deletion flow state
+    @State private var showConfirmation = false
+    @State private var isDeleting = false
+    @State private var deletionResult: DeletionResult?
+    @State private var showResult = false
     
     private let columns = [
         GridItem(.flexible(), spacing: 2),
@@ -301,7 +309,7 @@ struct TrashViewWithNavigation: View {
             Color.scBackground
                 .ignoresSafeArea()
             
-            if trashService.trashCount == 0 {
+            if trashService.trashCount == 0 && !isDeleting {
                 emptyState
             } else {
                 mainContent
@@ -311,18 +319,62 @@ struct TrashViewWithNavigation: View {
             if isSelectionMode && !selectedIDs.isEmpty {
                 selectionActionBar
             }
+            
+            // Deletion progress overlay
+            if isDeleting {
+                DeletionProgressView(
+                    progress: deletionService.progress,
+                    totalItems: trashService.trashCount
+                )
+            }
         }
         .navigationTitle("Trash")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                if trashService.trashCount > 0 {
+                if trashService.trashCount > 0 && !isDeleting {
                     Button(isSelectionMode ? "Done" : "Select") {
                         toggleSelectionMode()
                     }
                     .font(Typography.subheadline)
                     .foregroundStyle(Color.scPrimary)
                 }
+            }
+        }
+        .sheet(isPresented: $showConfirmation) {
+            EmptyTrashConfirmationView(
+                itemCount: trashService.trashCount,
+                isLimitedAccess: permissionService.status.isLimited,
+                onConfirm: {
+                    showConfirmation = false
+                    performDeletion()
+                },
+                onCancel: {
+                    showConfirmation = false
+                }
+            )
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(isPresented: $showResult) {
+            if let result = deletionResult {
+                DeletionResultView(
+                    result: result,
+                    onDone: {
+                        showResult = false
+                        deletionResult = nil
+                    },
+                    onRetry: {
+                        showResult = false
+                        deletionResult = nil
+                        // Small delay before retrying
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            performDeletion()
+                        }
+                    }
+                )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
             }
         }
         .onAppear {
@@ -447,9 +499,10 @@ struct TrashViewWithNavigation: View {
     private var emptyTrashButton: some View {
         VStack(spacing: Spacing.xs) {
             SCButton("Empty Trash", icon: "trash", style: .primary) {
-                // Step 6 will implement the confirmation
+                showConfirmation = true
             }
             .padding(.horizontal, Spacing.md)
+            .disabled(trashService.trashCount == 0 || isDeleting)
             
             Text("Moves items to Photos → Recently Deleted")
                 .font(Typography.caption2)
@@ -553,6 +606,38 @@ struct TrashViewWithNavigation: View {
             
             if !toRemove.isEmpty {
                 trashService.remove(toRemove)
+            }
+        }
+    }
+    
+    // MARK: - Deletion Flow
+    
+    private func performDeletion() {
+        // Get all asset IDs to delete
+        let assetIDsToDelete = trashService.orderedTrashedIDs
+        
+        guard !assetIDsToDelete.isEmpty else { return }
+        
+        isDeleting = true
+        
+        Task {
+            // Perform the deletion
+            let result = await deletionService.deleteAssets(assetIDsToDelete)
+            
+            // Update trash service with successfully deleted items
+            if result.deletedCount > 0 {
+                // Calculate which IDs were deleted (all except failed)
+                let failedSet = Set(result.failedIDs)
+                let deletedIDs = assetIDsToDelete.filter { !failedSet.contains($0) }
+                trashService.markDeleted(deletedIDs)
+            }
+            
+            isDeleting = false
+            
+            // Show result (unless user cancelled and nothing happened)
+            if result.error != .userCancelled || result.deletedCount > 0 {
+                deletionResult = result
+                showResult = true
             }
         }
     }

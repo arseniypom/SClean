@@ -124,6 +124,12 @@ final class TrashService: ObservableObject {
         saveToStorage()
     }
     
+    /// Mark assets as permanently deleted (removes from trash)
+    /// Call this after successful deletion from photo library
+    func markDeleted(_ assetIDs: [String]) {
+        remove(Set(assetIDs))
+    }
+    
     /// Filter assets to only include non-trashed items
     func filterVisible(_ assets: [YearAsset]) -> [YearAsset] {
         let trashedSet = trashedIDs
