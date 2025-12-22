@@ -162,11 +162,12 @@ private struct ButtonBackgroundModifier: ViewModifier {
 struct YearCard: View {
     let year: Int
     let count: Int
+    let totalBytes: Int64
     let action: () -> Void
     
     var body: some View {
         Button(action: action) {
-            YearCardContent(year: year, count: count)
+            YearCardContent(year: year, count: count, totalBytes: totalBytes)
         }
         .buttonStyle(.plain)
     }
@@ -176,6 +177,7 @@ struct YearCard: View {
 struct YearCardContent: View {
     let year: Int
     let count: Int
+    let totalBytes: Int64
     
     var body: some View {
         HStack {
@@ -184,9 +186,17 @@ struct YearCardContent: View {
                     .font(Typography.title2)
                     .foregroundStyle(Color.scTextPrimary)
                 
-                Text(countText)
-                    .font(Typography.subheadline)
-                    .foregroundStyle(Color.scTextSecondary)
+                HStack {
+                    Text(countText)
+                        .font(Typography.subheadline)
+                        .foregroundStyle(Color.scTextSecondary)
+                    
+                    Spacer()
+                    
+                    Text(sizeText)
+                        .font(Typography.subheadline)
+                        .foregroundStyle(Color.scTextDisabled)
+                }
             }
             
             Spacer()
@@ -203,7 +213,21 @@ struct YearCardContent: View {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         let formattedCount = formatter.string(from: NSNumber(value: count)) ?? "\(count)"
-        return "\(formattedCount) \(count == 1 ? "item" : "items")"
+        return "\(formattedCount) \(count == 1 ? "photo" : "photos")"
+    }
+    
+    private var sizeText: String {
+        let bytes = Double(totalBytes)
+        let gb = bytes / 1_073_741_824 // 1024^3
+        let mb = bytes / 1_048_576 // 1024^2
+        
+        if gb >= 1.0 {
+            return String(format: "%.1f GB", gb)
+        } else if mb >= 1.0 {
+            return String(format: "%.1f MB", mb)
+        } else {
+            return "< 1 MB"
+        }
     }
 }
 
@@ -402,7 +426,7 @@ struct InfoBanner: View {
 }
 
 #Preview("Year Card") {
-    YearCard(year: 2024, count: 1234) {}
+    YearCard(year: 2024, count: 1234, totalBytes: 2_500_000_000) {} // ~2.5 GB
         .padding()
         .background(Color.scBackground)
 }

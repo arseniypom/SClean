@@ -16,11 +16,13 @@ nonisolated struct YearBucket: Identifiable, Equatable, Sendable {
     let id: Int // year as ID
     let year: Int
     let count: Int
+    let totalBytes: Int64
     
-    init(year: Int, count: Int) {
+    init(year: Int, count: Int, totalBytes: Int64 = 0) {
         self.id = year
         self.year = year
         self.count = count
+        self.totalBytes = totalBytes
     }
 }
 
@@ -89,18 +91,29 @@ final class PhotoLibraryService: ObservableObject {
         
         let assets = PHAsset.fetchAssets(with: fetchOptions)
         
-        // Count items per year
-        var yearCounts: [Int: Int] = [:]
+        // Count items and size per year
+        var yearData: [Int: (count: Int, bytes: Int64)] = [:]
         
         assets.enumerateObjects { asset, _, _ in
             guard let date = asset.creationDate else { return }
             let year = Calendar.current.component(.year, from: date)
-            yearCounts[year, default: 0] += 1
+            
+            // Get estimated file size from asset resources
+            let resources = PHAssetResource.assetResources(for: asset)
+            let totalSize = resources.reduce(Int64(0)) { sum, resource in
+                if let size = resource.value(forKey: "fileSize") as? Int64 {
+                    return sum + size
+                }
+                return sum
+            }
+            
+            let current = yearData[year, default: (0, 0)]
+            yearData[year] = (current.count + 1, current.bytes + totalSize)
         }
         
         // Convert to buckets, sorted newest first
-        let buckets = yearCounts
-            .map { YearBucket(year: $0.key, count: $0.value) }
+        let buckets = yearData
+            .map { YearBucket(year: $0.key, count: $0.value.count, totalBytes: $0.value.bytes) }
             .sorted { $0.year > $1.year }
         
         return buckets

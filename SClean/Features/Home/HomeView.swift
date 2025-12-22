@@ -129,7 +129,7 @@ struct HomeView: View {
                             permissionService: permissionService
                         )
                     } label: {
-                        YearCardContent(year: bucket.year, count: bucket.count)
+                        YearCardContent(year: bucket.year, count: bucket.count, totalBytes: bucket.totalBytes)
                     }
                     .buttonStyle(.plain)
                     .padding(.horizontal, Spacing.md)
