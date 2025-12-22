@@ -32,10 +32,9 @@ enum AppearanceMode: String, CaseIterable, Identifiable {
 }
 
 extension AppearanceMode {
-    static let storageKey = "SClean.appearance"
+    static let storageKey = "SlideClean.appearance"
 
     static func from(raw: String) -> AppearanceMode {
         AppearanceMode(rawValue: raw) ?? .system
     }
 }
-

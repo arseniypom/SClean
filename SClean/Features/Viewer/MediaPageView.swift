@@ -150,3 +150,4 @@ struct MediaPageView: View {
         isCurrentPage: true
     )
 }
+

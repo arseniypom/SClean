@@ -215,3 +215,4 @@ struct TrashGridCell: View {
     .background(Color.scBackground)
 }
 
+

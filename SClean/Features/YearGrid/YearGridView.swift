@@ -118,38 +118,49 @@ struct YearGridView: View {
     // MARK: - Grid View
     
     private func gridView(_ assets: [YearAsset]) -> some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                // Limited Access banner
-                if permissionService.status.isLimited {
-                    InfoBanner(
-                        icon: "photo.badge.plus",
-                        message: "Showing selected photos only",
-                        style: .info
-                    ) {
-                        permissionService.presentLimitedLibraryPicker()
-                    }
-                    .padding(.horizontal, Spacing.md)
-                    .padding(.vertical, Spacing.sm)
-                }
-                
-                // Photo grid
-                LazyVGrid(columns: columns, spacing: 2) {
-                    ForEach(Array(assets.enumerated()), id: \.element.id) { index, asset in
-                        NavigationLink {
-                            MediaViewerView(
-                                assets: assets,
-                                startIndex: index,
-                                year: year,
-                                permissionService: permissionService
-                            )
-                        } label: {
-                            gridCell(for: asset)
+        GeometryReader { proxy in
+            let horizontalPadding: CGFloat = 2 * 2 // .padding(.horizontal, 2)
+            let spacing: CGFloat = 2
+            let totalSpacing: CGFloat = spacing * 2 // 3 columns -> 2 gaps
+            let side = (proxy.size.width - horizontalPadding - totalSpacing) / 3
+            
+            ScrollView {
+                VStack(spacing: 0) {
+                    // Limited Access banner
+                    if permissionService.status.isLimited {
+                        InfoBanner(
+                            icon: "photo.badge.plus",
+                            message: "Showing selected photos only",
+                            style: .info
+                        ) {
+                            permissionService.presentLimitedLibraryPicker()
                         }
-                        .buttonStyle(.plain)
+                        .padding(.horizontal, Spacing.md)
+                        .padding(.vertical, Spacing.sm)
                     }
+                    
+                    // Photo grid
+                    LazyVGrid(columns: columns, spacing: spacing) {
+                        ForEach(assets.indices, id: \.self) { index in
+                            let asset = assets[index]
+                            NavigationLink {
+                                MediaViewerView(
+                                    assets: assets,
+                                    startIndex: index,
+                                    year: year,
+                                    permissionService: permissionService
+                                )
+                            } label: {
+                                gridCell(for: asset)
+                                    .frame(width: side, height: side)
+                                    .contentShape(Rectangle())
+                                    .clipped()
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 2)
                 }
-                .padding(.horizontal, 2)
             }
         }
     }

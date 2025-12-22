@@ -45,8 +45,13 @@ struct MediaViewerView: View {
         self.year = year
         self.permissionService = permissionService
         self._currentIndex = State(initialValue: startIndex)
-        self._hasSeenBrowseHint = State(initialValue: UserDefaults.standard.bool(forKey: "SClean.hasSeenBrowseHint"))
-        self._hasSeenTrashHint = State(initialValue: UserDefaults.standard.bool(forKey: "SClean.hasSeenTrashHint"))
+        // Migrate hint flags from old keys if needed
+        let browseSeen = UserDefaults.standard.bool(forKey: "SlideClean.hasSeenBrowseHint") ||
+            UserDefaults.standard.bool(forKey: "SClean.hasSeenBrowseHint")
+        let trashSeen = UserDefaults.standard.bool(forKey: "SlideClean.hasSeenTrashHint") ||
+            UserDefaults.standard.bool(forKey: "SClean.hasSeenTrashHint")
+        self._hasSeenBrowseHint = State(initialValue: browseSeen)
+        self._hasSeenTrashHint = State(initialValue: trashSeen)
     }
     
     var body: some View {
@@ -302,7 +307,7 @@ struct MediaViewerView: View {
         withAnimation(.easeOut(duration: AnimationDuration.fast)) {
             hasSeenBrowseHint = true
         }
-        UserDefaults.standard.set(true, forKey: "SClean.hasSeenBrowseHint")
+        UserDefaults.standard.set(true, forKey: "SlideClean.hasSeenBrowseHint")
     }
 
     private func dismissTrashTip() {
@@ -313,7 +318,7 @@ struct MediaViewerView: View {
         }
         if !hasSeenTrashHint {
             hasSeenTrashHint = true
-            UserDefaults.standard.set(true, forKey: "SClean.hasSeenTrashHint")
+            UserDefaults.standard.set(true, forKey: "SlideClean.hasSeenTrashHint")
         }
     }
 

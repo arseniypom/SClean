@@ -160,32 +160,22 @@ struct ThumbnailImageView: View {
     @State private var loadTask: Task<Void, Never>?
     
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                // Placeholder
-                Rectangle()
-                    .fill(Color.scBorder.opacity(0.3))
-                
-                // Loaded image
-                if let image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                        .clipped()
-                        .transition(.opacity.animation(.easeIn(duration: AnimationDuration.fast)))
-                }
+        ZStack {
+            Rectangle()
+                .fill(Color.scBorder.opacity(0.3))
+            
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .transition(.opacity.animation(.easeIn(duration: AnimationDuration.fast)))
             }
         }
-        .aspectRatio(1, contentMode: .fit)
-        .onAppear {
-            loadThumbnail()
-        }
-        .onDisappear {
-            cancelLoad()
-        }
-        .onChange(of: assetID) { _, newID in
-            // Cell reuse: cancel old load, start new
+        .frame(maxWidth: .infinity, maxHeight: .infinity) // fill parent-provided square
+        .clipped()                                        // clip inside parent bounds
+        .onAppear { loadThumbnail() }
+        .onDisappear { cancelLoad() }
+        .onChange(of: assetID) { _, _ in
             cancelLoad()
             image = nil
             loadThumbnail()
@@ -202,10 +192,9 @@ struct ThumbnailImageView: View {
             }
         }
     }
-    
+
     private func cancelLoad() {
         loadTask?.cancel()
         loadTask = nil
     }
 }
-

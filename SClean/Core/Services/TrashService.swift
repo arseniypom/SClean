@@ -32,7 +32,7 @@ final class TrashService: ObservableObject {
     /// Shared instance
     static let shared = TrashService()
     
-    /// All trashed items (ordered by trashedAt, newest first)
+    /// All trashed items (ordered by trashedAt, oldest first)
     @Published private(set) var trashedItems: [TrashedItem] = []
     
     /// Last trashed item (for undo)
@@ -46,12 +46,12 @@ final class TrashService: ObservableObject {
         Set(trashedItems.map(\.assetID))
     }
     
-    /// Ordered list of trashed asset IDs (newest first)
+    /// Ordered list of trashed asset IDs (oldest first)
     var orderedTrashedIDs: [String] {
         trashedItems.map(\.assetID)
     }
     
-    private let userDefaultsKey = "SClean.trashedItems"
+    private let userDefaultsKey = "SlideClean.trashedItems"
     
     // Legacy key for migration
     private let legacyUserDefaultsKey = "SClean.trashedAssetIDs"
@@ -68,8 +68,8 @@ final class TrashService: ObservableObject {
         guard !isTrashed(assetID) else { return }
         
         let item = TrashedItem(assetID: assetID)
-        // Insert at beginning (newest first)
-        trashedItems.insert(item, at: 0)
+        // Append at end (oldest first ordering overall)
+        trashedItems.append(item)
         lastTrashedID = assetID
         saveToStorage()
     }
@@ -142,7 +142,8 @@ final class TrashService: ObservableObject {
         // Try loading new format first
         if let data = UserDefaults.standard.data(forKey: userDefaultsKey),
            let items = try? JSONDecoder().decode([TrashedItem].self, from: data) {
-            trashedItems = items
+            // Ensure oldest-first ordering by trashedAt
+            trashedItems = items.sorted { $0.trashedAt < $1.trashedAt }
             return
         }
         
@@ -152,6 +153,7 @@ final class TrashService: ObservableObject {
             // Convert to new format with current timestamp
             let now = Date()
             trashedItems = ids.map { TrashedItem(assetID: $0, trashedAt: now) }
+                .sorted { $0.trashedAt < $1.trashedAt }
             // Save in new format
             saveToStorage()
             // Remove legacy data

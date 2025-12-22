@@ -207,3 +207,4 @@ struct EmptyTrashConfirmationView: View {
     .background(Color.scBackground)
 }
 
+

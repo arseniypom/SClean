@@ -1,6 +1,6 @@
 //
 //  PhotoLibraryService.swift
-//  SClean
+//  SlideClean
 //
 //  Fetches and organizes photos from the library
 //

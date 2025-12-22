@@ -75,7 +75,7 @@ final class YearPhotosService: ObservableObject {
     
     // MARK: - Public Methods
     
-    /// Fetches all photos for the given year, newest first
+    /// Fetches all photos for the given year, oldest first
     func fetchPhotos() async {
         state = .loading
         
@@ -117,7 +117,7 @@ final class YearPhotosService: ObservableObject {
             return []
         }
         
-        // Fetch options: filter by year, sort newest first
+        // Fetch options: filter by year, sort oldest first
         let fetchOptions = PHFetchOptions()
         fetchOptions.predicate = NSPredicate(
             format: "creationDate >= %@ AND creationDate < %@",
@@ -125,7 +125,7 @@ final class YearPhotosService: ObservableObject {
             endDate as NSDate
         )
         fetchOptions.sortDescriptors = [
-            NSSortDescriptor(key: "creationDate", ascending: false)
+            NSSortDescriptor(key: "creationDate", ascending: true)
         ]
         fetchOptions.includeHiddenAssets = false
         fetchOptions.includeAllBurstAssets = false
@@ -163,4 +163,3 @@ final class YearPhotosService: ObservableObject {
         return assets
     }
 }
-

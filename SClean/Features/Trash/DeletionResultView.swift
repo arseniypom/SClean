@@ -236,3 +236,4 @@ struct DeletionResultView: View {
     )
     .background(Color.scBackground)
 }
+
