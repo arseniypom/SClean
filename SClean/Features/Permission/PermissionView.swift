@@ -52,12 +52,12 @@ struct PermissionView: View {
             // Icon
             ZStack {
                 Circle()
-                    .fill(Color.scPrimary.opacity(0.1))
+                    .fill(Color.scTint.opacity(0.1))
                     .frame(width: 120, height: 120)
                 
                 Image(systemName: "photo.stack.fill")
                     .font(.system(size: 48, weight: .medium))
-                    .foregroundStyle(Color.scPrimary)
+                    .foregroundStyle(Color.scTint)
             }
             
             // Text
@@ -89,7 +89,7 @@ struct PermissionView: View {
         HStack(spacing: Spacing.sm) {
             Image(systemName: icon)
                 .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Color.scPrimary)
+                .foregroundStyle(Color.scTint)
                 .frame(width: 24)
             
             Text(text)

@@ -84,7 +84,7 @@ struct EmptyTrashConfirmationView: View {
                 } label: {
                     Text("Cancel")
                         .font(Typography.headline)
-                        .foregroundStyle(Color.scPrimary)
+                        .foregroundStyle(Color.scTint)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Spacing.md)
                 }
@@ -112,7 +112,7 @@ struct EmptyTrashConfirmationView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, Spacing.md)
                 .background(Color.scError)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
         }
     }
     

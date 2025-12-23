@@ -22,7 +22,7 @@ struct DeletionProgressView: View {
                 // Spinner
                 ProgressView()
                     .scaleEffect(1.5)
-                    .tint(.scPrimary)
+                    .tint(.scTint)
                 
                 // Label
                 VStack(spacing: Spacing.xs) {

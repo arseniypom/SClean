@@ -141,8 +141,8 @@ struct DeletionResultView: View {
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Spacing.md)
-                        .background(Color.scPrimary)
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
+                        .background(Color.scTint)
+                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
                 }
                 
             } else if result.isPartialSuccess {
@@ -155,8 +155,8 @@ struct DeletionResultView: View {
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Spacing.md)
-                        .background(Color.scPrimary)
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
+                        .background(Color.scTint)
+                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
                 }
                 
                 Button {
@@ -164,7 +164,7 @@ struct DeletionResultView: View {
                 } label: {
                     Text("Try Again")
                         .font(Typography.headline)
-                        .foregroundStyle(Color.scPrimary)
+                        .foregroundStyle(Color.scTint)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Spacing.md)
                 }
@@ -179,8 +179,8 @@ struct DeletionResultView: View {
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Spacing.md)
-                        .background(Color.scPrimary)
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
+                        .background(Color.scTint)
+                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
                 }
                 
                 Button {

@@ -204,7 +204,7 @@ struct MediaViewerView: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Spacing.md)
                         .background(.white.opacity(0.15))
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
+                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
                 }
                 
                 // Go to Trash button
@@ -218,11 +218,11 @@ struct MediaViewerView: View {
                             Text("Go to Trash (\(trashService.trashCount))")
                                 .font(Typography.headline)
                         }
-                        .foregroundStyle(Color.scAccent)
+                        .foregroundStyle(Color.scBlade)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Spacing.md)
-                        .background(Color.scAccent.opacity(0.15))
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
+                        .background(Color.scBlade.opacity(0.15))
+                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
                     }
                 }
             }

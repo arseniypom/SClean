@@ -40,7 +40,7 @@ struct UndoToast: View {
             }) {
                 Text("Undo")
                     .font(Typography.headline)
-                    .foregroundStyle(Color.scAccent)
+                    .foregroundStyle(Color.scBlade)
             }
         }
         .padding(.horizontal, Spacing.md)
@@ -78,12 +78,12 @@ private extension View {
         if #available(iOS 26.0, *) {
             self
                 .background(.black.opacity(0.7))
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
                 .glassEffect()
         } else {
             self
                 .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
         }
     }
 }

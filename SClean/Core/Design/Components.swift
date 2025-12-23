@@ -21,7 +21,7 @@ extension View {
         self
             .background(Color.scSurface)
             .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
-            .scShadow(.card)
+            .scShadow(.subtle)
     }
     
     /// Control surface - Liquid Glass on iOS 26+, Material on older
@@ -45,12 +45,12 @@ extension View {
         if #available(iOS 26.0, *) {
             self
                 .glassEffect()
-        } else {
+            } else {
             self
                 .background(Color.scSurface)
                 .clipShape(Circle())
-                .scShadow(.elevated)
-        }
+                .scShadow(.subtle)
+            }
     }
 }
 
@@ -112,7 +112,7 @@ struct SCButton: View {
         case .primary:
             return .scTextInverse
         case .secondary, .ghost:
-            return .scPrimary
+            return .scTint
         }
     }
 }
@@ -132,8 +132,8 @@ private struct ButtonBackgroundModifier: ViewModifier {
         case .primary:
             // Primary always solid for legibility + brand
             content
-                .background(Color.scPrimary)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
+                .background(Color.scTint)
+                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
             
         case .secondary:
             // Secondary: glass on iOS 26+, bordered on older
@@ -143,10 +143,10 @@ private struct ButtonBackgroundModifier: ViewModifier {
             } else {
                 content
                     .background(Color.clear)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
                     .overlay {
-                        RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous)
-                            .strokeBorder(Color.scPrimary.opacity(0.3), lineWidth: 1.5)
+                        RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous)
+                            .strokeBorder(Color.scTint.opacity(0.3), lineWidth: StrokeWidth.hairline)
                     }
             }
             
@@ -242,12 +242,12 @@ struct TrashCardContent: View {
             // Trash icon with accent background
             ZStack {
                 Circle()
-                    .fill(Color.scAccent.opacity(0.15))
+                    .fill(Color.scBlade.opacity(0.15))
                     .frame(width: 44, height: 44)
                 
                 Image(systemName: "trash")
                     .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(Color.scAccent)
+                    .foregroundStyle(Color.scBlade)
             }
             
             VStack(alignment: .leading, spacing: Spacing.xxs) {
@@ -336,7 +336,7 @@ struct LoadingStateView: View {
         VStack(spacing: Spacing.md) {
             ProgressView()
                 .scaleEffect(1.2)
-                .tint(.scPrimary)
+                .tint(.scTint)
             
             Text(message)
                 .font(Typography.subheadline)
@@ -409,7 +409,7 @@ struct InfoBanner: View {
         }
         .padding(Spacing.sm)
         .background(style.backgroundColor)
-        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
     }
 }
 
