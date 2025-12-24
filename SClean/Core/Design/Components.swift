@@ -331,17 +331,59 @@ struct EmptyStateView: View {
 
 struct LoadingStateView: View {
     let message: String
+    let detail: String?
+    let showsProgressBar: Bool
+    let progress: Double?
+    
+    init(
+        message: String,
+        detail: String? = nil,
+        showsProgressBar: Bool = false,
+        progress: Double? = nil
+    ) {
+        self.message = message
+        self.detail = detail
+        self.showsProgressBar = showsProgressBar
+        self.progress = progress
+    }
     
     var body: some View {
-        VStack(spacing: Spacing.md) {
+        VStack(spacing: Spacing.lg) {
+            // Spinner
             ProgressView()
-                .scaleEffect(1.2)
+                .scaleEffect(1.0)
                 .tint(.scTint)
             
+            // Main message - primary, bold
             Text(message)
-                .font(Typography.subheadline)
-                .foregroundStyle(Color.scTextSecondary)
+                .font(Typography.headline)
+                .foregroundStyle(Color.scTextPrimary)
+                .multilineTextAlignment(.center)
+
+            // Detail - subtle
+            if let detail {
+                Text(detail)
+                    .font(Typography.caption2)
+                    .foregroundStyle(Color.scTextDisabled)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, -Spacing.xs)
+            }
+
+            // Progress bar - minimal, precise
+            if showsProgressBar {
+                Group {
+                    if let progress {
+                        ProgressView(value: progress)
+                    } else {
+                        ProgressView()
+                    }
+                }
+                .progressViewStyle(.linear)
+                .tint(.scBlade)
+                .frame(maxWidth: 240)
+            }
         }
+        .padding(.vertical, Spacing.xl)
     }
 }
 

@@ -1,6 +1,6 @@
 //
 //  PhotoLibraryService.swift
-//  SlideClean
+//  SClean
 //
 //  Fetches and organizes photos from the library
 //
@@ -53,6 +53,7 @@ nonisolated enum LibraryState: Equatable, Sendable {
 final class PhotoLibraryService: ObservableObject {
     
     @Published private(set) var state: LibraryState = .idle
+    @Published private(set) var indexingProgress: Double? = nil
     
     private var changeObserverWrapper: ChangeObserverWrapper?
     
@@ -63,11 +64,27 @@ final class PhotoLibraryService: ObservableObject {
     /// Fetches all photos and buckets them by year
     func fetchYears() async {
         state = .loading
+        indexingProgress = 0
         
-        // Run the heavy work off main thread
-        let buckets = await Task.detached(priority: .userInitiated) {
-            Self.computeYearBuckets()
-        }.value
+        let (progressStream, continuation) = AsyncStream<Double>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        
+        let computeTask = Task.detached(priority: .userInitiated) { () -> [YearBucket] in
+            defer { continuation.finish() }
+            return Self.computeYearBuckets(onProgress: { processed, total in
+                guard total > 0 else { return }
+                continuation.yield(Double(processed) / Double(total))
+            })
+        }
+        
+        // Consume progress on MainActor without capturing self in the detached task.
+        for await progress in progressStream {
+            indexingProgress = progress
+        }
+        
+        let buckets = await computeTask.value
+        indexingProgress = nil
         
         if buckets.isEmpty {
             state = .empty
@@ -83,7 +100,9 @@ final class PhotoLibraryService: ObservableObject {
     
     // MARK: - Private Methods
     
-    private nonisolated static func computeYearBuckets() -> [YearBucket] {
+    private nonisolated static func computeYearBuckets(
+        onProgress: (@Sendable (_ processed: Int, _ total: Int) -> Void)? = nil
+    ) -> [YearBucket] {
         let fetchOptions = PHFetchOptions()
         fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         fetchOptions.includeHiddenAssets = false
@@ -91,10 +110,28 @@ final class PhotoLibraryService: ObservableObject {
         
         let assets = PHAsset.fetchAssets(with: fetchOptions)
         
+        let total = assets.count
+        let step = max(250, total / 200) // ~<=200 updates, capped for perf
+        
         // Count items and size per year
         var yearData: [Int: (count: Int, bytes: Int64)] = [:]
+        var processed = 0
         
-        assets.enumerateObjects { asset, _, _ in
+        assets.enumerateObjects { asset, _, stop in
+            if Task.isCancelled {
+                stop.pointee = true
+                return
+            }
+            
+            defer {
+                processed += 1
+                if let onProgress, total > 0 {
+                    if processed == 1 || processed == total || (processed % step) == 0 {
+                        onProgress(processed, total)
+                    }
+                }
+            }
+            
             guard let date = asset.creationDate else { return }
             let year = Calendar.current.component(.year, from: date)
             
@@ -112,11 +149,9 @@ final class PhotoLibraryService: ObservableObject {
         }
         
         // Convert to buckets, sorted newest first
-        let buckets = yearData
+        return yearData
             .map { YearBucket(year: $0.key, count: $0.value.count, totalBytes: $0.value.bytes) }
             .sorted { $0.year > $1.year }
-        
-        return buckets
     }
     
     // MARK: - Change Observer
@@ -162,3 +197,5 @@ private nonisolated final class ChangeObserverWrapper: NSObject, PHPhotoLibraryC
         onChange()
     }
 }
+
+

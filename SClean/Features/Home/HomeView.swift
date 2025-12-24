@@ -24,12 +24,13 @@ struct HomeView: View {
     
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .bottomLeading) {
+            ZStack {
                 Color.scBackground
                     .ignoresSafeArea()
                 
                 content
-                
+            }
+            .overlay(alignment: .bottomLeading) {
                 // Floating refresh button (bottom-left)
                 if canRefresh {
                     refreshButton
@@ -77,7 +78,14 @@ struct HomeView: View {
         switch libraryService.state {
         case .idle, .loading:
             if cachedYears.isEmpty {
-                LoadingStateView(message: "Indexing years…")
+                LoadingStateView(
+                    message: "Indexing years…",
+                    detail: "This runs once and may take a moment.",
+                    showsProgressBar: true,
+                    progress: libraryService.indexingProgress
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, Spacing.xl)
             } else {
                 yearsList(cachedYears)
             }
