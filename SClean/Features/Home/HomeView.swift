@@ -14,13 +14,6 @@ struct HomeView: View {
     
     @State private var hasAppeared = false
     @State private var cachedYears: [YearBucket] = []
-    @State private var isRefreshing = false
-    
-    private var canRefresh: Bool {
-        if case .loaded = libraryService.state { return true }
-        if !cachedYears.isEmpty { return true }
-        return false
-    }
     
     var body: some View {
         NavigationStack {
@@ -30,19 +23,11 @@ struct HomeView: View {
                 
                 content
             }
-            .overlay(alignment: .bottomLeading) {
-                // Floating refresh button (bottom-left)
-                if canRefresh {
-                    refreshButton
-                        .padding(.leading, Spacing.md)
-                        .padding(.bottom, Spacing.lg)
-                }
-            }
             .navigationTitle("Years")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
-                        SettingsView()
+                        SettingsView(libraryService: libraryService)
                     } label: {
                         Image(systemName: "gearshape")
                             .font(.system(size: 18, weight: .medium))
@@ -80,7 +65,7 @@ struct HomeView: View {
             if cachedYears.isEmpty {
                 LoadingStateView(
                     message: "Indexing years…",
-                    detail: "This runs once and may take a moment.",
+                    detail: "Runs in the background and may take a moment the first time.",
                     showsProgressBar: true,
                     progress: libraryService.indexingProgress
                 )
@@ -142,7 +127,7 @@ struct HomeView: View {
                     .buttonStyle(.plain)
                     .padding(.horizontal, Spacing.md)
                 }
-                
+
                 // Trash card (only show if there are trashed items)
                 if trashService.trashCount > 0 {
                     NavigationLink {
@@ -161,12 +146,6 @@ struct HomeView: View {
                         .padding(.horizontal, Spacing.md)
                         .padding(.top, Spacing.xxs)
                 }
-
-                // Spacer to avoid overlay by floating refresh button
-                if canRefresh {
-                    Color.clear
-                        .frame(height: 96)
-                }
             }
             .padding(.vertical, Spacing.sm)
         }
@@ -177,38 +156,6 @@ struct HomeView: View {
         Task {
             await libraryService.fetchYears()
         }
-    }
-    
-    // MARK: - Refresh Button
-    
-    private var refreshButton: some View {
-        Button {
-            guard !isRefreshing else { return }
-            isRefreshing = true
-            Task {
-                await libraryService.refresh()
-                isRefreshing = false
-            }
-        } label: {
-            refreshButtonContent
-        }
-        .disabled(isRefreshing)
-    }
-    
-    @ViewBuilder
-    private var refreshButtonContent: some View {
-        Group {
-            if isRefreshing {
-                ProgressView()
-                    .tint(.scTextPrimary)
-            } else {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(Color.scTextPrimary)
-            }
-        }
-        .frame(width: 56, height: 56)
-        .scFloatingButtonStyle()
     }
 }
 

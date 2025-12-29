@@ -213,7 +213,7 @@ struct YearCardContent: View {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
         let formattedCount = formatter.string(from: NSNumber(value: count)) ?? "\(count)"
-        return "\(formattedCount) \(count == 1 ? "photo" : "photos")"
+        return "\(formattedCount) media"
     }
     
     private var sizeText: String {
@@ -492,4 +492,3 @@ struct InfoBanner: View {
     .padding()
     .background(Color.scBackground)
 }
-

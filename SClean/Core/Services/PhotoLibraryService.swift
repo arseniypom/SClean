@@ -55,37 +55,57 @@ final class PhotoLibraryService: ObservableObject {
     @Published private(set) var state: LibraryState = .idle
     @Published private(set) var indexingProgress: Double? = nil
     
+    private let indexStore: LibraryIndexStore
+    private let indexer: LibraryIndexer
     private var changeObserverWrapper: ChangeObserverWrapper?
     
-    init() {}
+    init(
+        indexStore: LibraryIndexStore = .shared,
+        indexer: LibraryIndexer? = nil
+    ) {
+        self.indexStore = indexStore
+        self.indexer = indexer ?? LibraryIndexer()
+    }
     
     // MARK: - Public Methods
     
     /// Fetches all photos and buckets them by year
     func fetchYears() async {
-        state = .loading
         indexingProgress = 0
+        
+        // Load cached snapshot for instant UI when available
+        let cachedSnapshot = indexStore.loadSnapshot()
+        if let cachedSnapshot, !cachedSnapshot.yearBuckets.isEmpty {
+            state = .loaded(cachedSnapshot.yearBuckets)
+        } else {
+            state = .loading
+        }
         
         let (progressStream, continuation) = AsyncStream<Double>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
         )
         
-        let computeTask = Task.detached(priority: .userInitiated) { () -> [YearBucket] in
+        let computeTask = Task { () -> LibraryIndexSnapshot in
             defer { continuation.finish() }
-            return Self.computeYearBuckets(onProgress: { processed, total in
-                guard total > 0 else { return }
-                continuation.yield(Double(processed) / Double(total))
-            })
+            return await indexer.buildIndex(
+                existingSnapshot: cachedSnapshot,
+                onProgress: { processed, total in
+                    guard total > 0 else { return }
+                    continuation.yield(Double(processed) / Double(total))
+                }
+            )
         }
         
-        // Consume progress on MainActor without capturing self in the detached task.
         for await progress in progressStream {
             indexingProgress = progress
         }
         
-        let buckets = await computeTask.value
+        let snapshot = await computeTask.value
+        indexStore.saveSnapshot(snapshot)
+        
         indexingProgress = nil
         
+        let buckets = snapshot.yearBuckets
         if buckets.isEmpty {
             state = .empty
         } else {
@@ -96,62 +116,6 @@ final class PhotoLibraryService: ObservableObject {
     /// Refreshes the years list
     func refresh() async {
         await fetchYears()
-    }
-    
-    // MARK: - Private Methods
-    
-    private nonisolated static func computeYearBuckets(
-        onProgress: (@Sendable (_ processed: Int, _ total: Int) -> Void)? = nil
-    ) -> [YearBucket] {
-        let fetchOptions = PHFetchOptions()
-        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        fetchOptions.includeHiddenAssets = false
-        fetchOptions.includeAllBurstAssets = false
-        
-        let assets = PHAsset.fetchAssets(with: fetchOptions)
-        
-        let total = assets.count
-        let step = max(250, total / 200) // ~<=200 updates, capped for perf
-        
-        // Count items and size per year
-        var yearData: [Int: (count: Int, bytes: Int64)] = [:]
-        var processed = 0
-        
-        assets.enumerateObjects { asset, _, stop in
-            if Task.isCancelled {
-                stop.pointee = true
-                return
-            }
-            
-            defer {
-                processed += 1
-                if let onProgress, total > 0 {
-                    if processed == 1 || processed == total || (processed % step) == 0 {
-                        onProgress(processed, total)
-                    }
-                }
-            }
-            
-            guard let date = asset.creationDate else { return }
-            let year = Calendar.current.component(.year, from: date)
-            
-            // Get estimated file size from asset resources
-            let resources = PHAssetResource.assetResources(for: asset)
-            let totalSize = resources.reduce(Int64(0)) { sum, resource in
-                if let size = resource.value(forKey: "fileSize") as? Int64 {
-                    return sum + size
-                }
-                return sum
-            }
-            
-            let current = yearData[year, default: (0, 0)]
-            yearData[year] = (current.count + 1, current.bytes + totalSize)
-        }
-        
-        // Convert to buckets, sorted newest first
-        return yearData
-            .map { YearBucket(year: $0.key, count: $0.value.count, totalBytes: $0.value.bytes) }
-            .sorted { $0.year > $1.year }
     }
     
     // MARK: - Change Observer
@@ -197,7 +161,3 @@ private nonisolated final class ChangeObserverWrapper: NSObject, PHPhotoLibraryC
         onChange()
     }
 }
-
-
-
-

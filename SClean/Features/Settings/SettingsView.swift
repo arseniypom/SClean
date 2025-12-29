@@ -39,7 +39,50 @@ private struct AppearancePicker: View {
     }
 }
 
+private struct LibraryActionsCard: View {
+    @ObservedObject var libraryService: PhotoLibraryService
+    @State private var isRefreshing = false
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            Text("Library")
+                .font(Typography.subheadline)
+                .foregroundStyle(Color.scTextSecondary)
+            
+            Text("Refresh the media index if something looks out of date.")
+                .font(Typography.body)
+                .foregroundStyle(Color.scTextSecondary)
+            
+            SCButton(buttonTitle, icon: buttonIcon, style: .secondary) {
+                refreshLibrary()
+            }
+            .disabled(isRefreshing || libraryService.state.isLoading)
+        }
+        .padding(Spacing.md)
+        .scCardStyle()
+    }
+    
+    private var buttonTitle: String {
+        (isRefreshing || libraryService.state.isLoading) ? "Refreshing…" : "Refresh Library"
+    }
+    
+    private var buttonIcon: String? {
+        (isRefreshing || libraryService.state.isLoading) ? nil : "arrow.clockwise"
+    }
+    
+    private func refreshLibrary() {
+        guard !isRefreshing, !libraryService.state.isLoading else { return }
+        isRefreshing = true
+        Task { @MainActor in
+            await libraryService.refresh()
+            isRefreshing = false
+        }
+    }
+}
+
 struct SettingsView: View {
+    @ObservedObject var libraryService: PhotoLibraryService
+    
     var body: some View {
         ZStack {
             Color.scBackground
@@ -50,7 +93,7 @@ struct SettingsView: View {
                     // Appearance card
                     AppearancePicker()
                     
-                    // Additional settings can go here
+                    LibraryActionsCard(libraryService: libraryService)
                 }
                 .padding(.horizontal, Spacing.md)
                 .padding(.vertical, Spacing.sm)
@@ -64,6 +107,6 @@ struct SettingsView: View {
 
 #Preview {
     NavigationStack {
-        SettingsView()
+        SettingsView(libraryService: PhotoLibraryService())
     }
 }
