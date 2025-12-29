@@ -48,52 +48,44 @@ struct PermissionView: View {
     // MARK: - Request Content
     
     private var requestContent: some View {
-        VStack(spacing: Spacing.xl) {
-            // Icon
-            ZStack {
-                Circle()
-                    .fill(Color.scTint.opacity(0.1))
-                    .frame(width: 120, height: 120)
-                
-                Image(systemName: "photo.stack.fill")
-                    .font(.system(size: 48, weight: .medium))
-                    .foregroundStyle(Color.scTint)
-            }
+        VStack(spacing: Spacing.xxl) {
+            // Bold icon - large, stark, minimal
+            Image(systemName: "photo.stack.fill")
+                .font(.system(size: 80, weight: .bold))
+                .foregroundStyle(Color.scTextPrimary)
             
             // Text
-            VStack(spacing: Spacing.sm) {
+            VStack(spacing: Spacing.md) {
                 Text("Access Your Photos")
-                    .font(Typography.title1)
+                    .font(.system(size: 36, weight: .black, design: .rounded))
                     .foregroundStyle(Color.scTextPrimary)
+                    .multilineTextAlignment(.center)
                 
-                Text("We need access to your photo library to show your photos by year. Nothing is deleted until you explicitly empty the trash.")
-                    .font(Typography.body)
+                Text("We need access to your photo library to show your photos by year.")
+                    .font(.system(size: 17, weight: .regular))
                     .foregroundStyle(Color.scTextSecondary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
             
-            // Trust indicators
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                trustItem(icon: "lock.shield", text: "Your photos stay on device")
-                trustItem(icon: "trash.slash", text: "Nothing deleted without your action")
-                trustItem(icon: "eye.slash", text: "We don't upload or share anything")
+            // Trust indicators - minimal, clean
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                trustItem(icon: "lock.shield.fill", text: "Your photos stay on device")
+                trustItem(icon: "trash.slash.fill", text: "Nothing deleted without action")
+                trustItem(icon: "eye.slash.fill", text: "No uploads or sharing")
             }
-            .padding(Spacing.md)
-            .background(Color.scSurfaceElevated)
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
         }
     }
     
     private func trustItem(icon: String, text: String) -> some View {
         HStack(spacing: Spacing.sm) {
             Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(Color.scTint)
-                .frame(width: 24)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(Color.scTextPrimary)
+                .frame(width: 28)
             
             Text(text)
-                .font(Typography.callout)
+                .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(Color.scTextPrimary)
         }
     }

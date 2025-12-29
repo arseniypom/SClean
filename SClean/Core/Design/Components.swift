@@ -110,9 +110,10 @@ struct SCButton: View {
     private var foregroundColor: Color {
         switch style {
         case .primary:
-            return .scTextInverse
+            // Inverse: white on black button (light mode), black on white button (dark mode)
+            return Color(light: "FFFFFF", dark: "0A0A0C")
         case .secondary, .ghost:
-            return .scTint
+            return .scTextPrimary
         }
     }
 }
@@ -130,9 +131,9 @@ private struct ButtonBackgroundModifier: ViewModifier {
     func body(content: Content) -> some View {
         switch style {
         case .primary:
-            // Primary always solid for legibility + brand
+            // Primary: bold black on white / white on black for minimalism
             content
-                .background(Color.scTint)
+                .background(Color.scTextPrimary)
                 .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
             
         case .secondary:
@@ -146,7 +147,7 @@ private struct ButtonBackgroundModifier: ViewModifier {
                     .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
                     .overlay {
                         RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous)
-                            .strokeBorder(Color.scTint.opacity(0.3), lineWidth: StrokeWidth.hairline)
+                            .strokeBorder(Color.scBorder, lineWidth: StrokeWidth.hairline)
                     }
             }
             
@@ -242,12 +243,12 @@ struct TrashCardContent: View {
             // Trash icon with accent background
             ZStack {
                 Circle()
-                    .fill(Color.scBlade.opacity(0.15))
+                    .fill(Color.scTextPrimary.opacity(0.1))
                     .frame(width: 44, height: 44)
                 
                 Image(systemName: "trash")
                     .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(Color.scBlade)
+                    .foregroundStyle(Color.scTextPrimary)
             }
             
             VStack(alignment: .leading, spacing: Spacing.xxs) {
@@ -291,7 +292,7 @@ struct StatsCardView: View {
                 value: statsService.formattedMediaCount,
                 label: "Media Deleted",
                 icon: "photo.stack",
-                color: .scBlade
+                color: .scTextPrimary
             )
             
             // Divider
@@ -439,7 +440,7 @@ struct LoadingStateView: View {
             // Spinner
             ProgressView()
                 .scaleEffect(1.0)
-                .tint(.scTint)
+                .tint(.scTextPrimary)
             
             // Main message - primary, bold
             Text(message)
@@ -466,7 +467,7 @@ struct LoadingStateView: View {
                     }
                 }
                 .progressViewStyle(.linear)
-                .tint(.scBlade)
+                .tint(.scTextPrimary)
                 .frame(maxWidth: 240)
             }
         }

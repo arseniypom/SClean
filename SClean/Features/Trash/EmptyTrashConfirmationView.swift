@@ -84,7 +84,7 @@ struct EmptyTrashConfirmationView: View {
                 } label: {
                     Text("Cancel")
                         .font(Typography.headline)
-                        .foregroundStyle(Color.scTint)
+                        .foregroundStyle(Color.scTextSecondary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Spacing.md)
                 }

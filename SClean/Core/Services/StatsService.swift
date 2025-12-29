@@ -74,7 +74,7 @@ final class StatsService: ObservableObject {
         } else if mb >= 1.0 {
             return String(format: "%.1f", mb)
         } else {
-            return "< 1"
+            return "0"
         }
     }
     

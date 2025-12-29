@@ -52,8 +52,8 @@ extension Color {
     /// Text/icon on Blade or other filled controls
     static let scTextInverse = Color(light: "FFFFFF", dark: "0A0A0C")
 
-    // Interactive
-    static let scTint = scBlade
+    // Interactive - use primary text for minimalism
+    static let scTint = scTextPrimary
     static let scDestructive = Color(uiColor: .systemRed)
 }
 

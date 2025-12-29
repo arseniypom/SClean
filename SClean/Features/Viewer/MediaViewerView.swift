@@ -235,10 +235,10 @@ struct MediaViewerView: View {
                             Text("Go to Trash (\(trashService.trashCount))")
                                 .font(Typography.headline)
                         }
-                        .foregroundStyle(Color.scBlade)
+                        .foregroundStyle(Color.scTextPrimary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Spacing.md)
-                        .background(Color.scBlade.opacity(0.15))
+                        .background(Color.scSurfaceElevated)
                         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
                     }
                 }

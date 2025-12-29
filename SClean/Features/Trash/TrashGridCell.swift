@@ -104,7 +104,7 @@ struct TrashGridCell: View {
                     Spacer()
                     ZStack {
                         Circle()
-                            .fill(isSelected ? Color.scTint : Color.white.opacity(0.9))
+                            .fill(isSelected ? Color.scTextPrimary : Color.white.opacity(0.9))
                             .frame(width: 24, height: 24)
                         
                         if isSelected {

@@ -40,7 +40,7 @@ struct UndoToast: View {
             }) {
                 Text("Undo")
                     .font(Typography.headline)
-                    .foregroundStyle(Color.scBlade)
+                    .foregroundStyle(.white)
             }
         }
         .padding(.horizontal, Spacing.md)

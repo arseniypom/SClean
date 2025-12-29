@@ -138,12 +138,12 @@ struct DeletionResultView: View {
                 } label: {
                     Text("Done")
                         .font(Typography.headline)
-                        .foregroundStyle(Color.scTint)
+                        .foregroundStyle(Color.scTextPrimary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Spacing.md)
                         .background {
                             RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous)
-                                .stroke(Color.scTint.opacity(0.3), lineWidth: StrokeWidth.hairline)
+                                .stroke(Color.scBorder, lineWidth: StrokeWidth.hairline)
                         }
                 }
                 
@@ -154,12 +154,12 @@ struct DeletionResultView: View {
                 } label: {
                     Text("Review Remaining Items")
                         .font(Typography.headline)
-                        .foregroundStyle(Color.scTint)
+                        .foregroundStyle(Color.scTextPrimary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Spacing.md)
                         .background {
                             RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous)
-                                .stroke(Color.scTint.opacity(0.3), lineWidth: StrokeWidth.hairline)
+                                .stroke(Color.scBorder, lineWidth: StrokeWidth.hairline)
                         }
                 }
                 
@@ -180,12 +180,12 @@ struct DeletionResultView: View {
                 } label: {
                     Text("Try Again")
                         .font(Typography.headline)
-                        .foregroundStyle(Color.scTint)
+                        .foregroundStyle(Color.scTextPrimary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Spacing.md)
                         .background {
                             RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous)
-                                .stroke(Color.scTint.opacity(0.3), lineWidth: StrokeWidth.hairline)
+                                .stroke(Color.scBorder, lineWidth: StrokeWidth.hairline)
                         }
                 }
                 

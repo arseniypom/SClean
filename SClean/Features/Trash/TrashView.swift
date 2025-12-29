@@ -203,7 +203,7 @@ struct TrashView: View {
                         Text("Restore (\(selectedIDs.count))")
                             .font(Typography.headline)
                     }
-                    .foregroundStyle(Color.scTint)
+                    .foregroundStyle(Color.scTextPrimary)
                     .padding(.horizontal, Spacing.md)
                     .padding(.vertical, Spacing.sm)
                     .scControlSurface()
@@ -556,7 +556,7 @@ struct TrashViewWithNavigation: View {
                         Text("Restore (\(selectedIDs.count))")
                             .font(Typography.headline)
                     }
-                    .foregroundStyle(Color.scTint)
+                    .foregroundStyle(Color.scTextPrimary)
                     .padding(.horizontal, Spacing.md)
                     .padding(.vertical, Spacing.sm)
                     .scControlSurface()
