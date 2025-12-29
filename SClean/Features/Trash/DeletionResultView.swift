@@ -138,11 +138,13 @@ struct DeletionResultView: View {
                 } label: {
                     Text("Done")
                         .font(Typography.headline)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.scTint)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Spacing.md)
-                        .background(Color.scTint)
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
+                        .background {
+                            RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous)
+                                .stroke(Color.scTint.opacity(0.3), lineWidth: StrokeWidth.hairline)
+                        }
                 }
                 
             } else if result.isPartialSuccess {
@@ -152,11 +154,13 @@ struct DeletionResultView: View {
                 } label: {
                     Text("Review Remaining Items")
                         .font(Typography.headline)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.scTint)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Spacing.md)
-                        .background(Color.scTint)
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
+                        .background {
+                            RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous)
+                                .stroke(Color.scTint.opacity(0.3), lineWidth: StrokeWidth.hairline)
+                        }
                 }
                 
                 Button {
@@ -164,7 +168,7 @@ struct DeletionResultView: View {
                 } label: {
                     Text("Try Again")
                         .font(Typography.headline)
-                        .foregroundStyle(Color.scTint)
+                        .foregroundStyle(Color.scTextSecondary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Spacing.md)
                 }
@@ -176,11 +180,13 @@ struct DeletionResultView: View {
                 } label: {
                     Text("Try Again")
                         .font(Typography.headline)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(Color.scTint)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, Spacing.md)
-                        .background(Color.scTint)
-                        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
+                        .background {
+                            RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous)
+                                .stroke(Color.scTint.opacity(0.3), lineWidth: StrokeWidth.hairline)
+                        }
                 }
                 
                 Button {

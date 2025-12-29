@@ -108,11 +108,13 @@ struct EmptyTrashConfirmationView: View {
         } label: {
             Text("Delete \(itemCount) \(itemCount == 1 ? "Item" : "Items")")
                 .font(Typography.headline)
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.scError)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, Spacing.md)
-                .background(Color.scError)
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
+                .background {
+                    RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous)
+                        .stroke(Color.scError.opacity(0.3), lineWidth: StrokeWidth.hairline)
+                }
         }
     }
     

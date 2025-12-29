@@ -26,6 +26,12 @@ struct MediaViewerView: View {
     /// Number of items to prefetch in each direction
     private let prefetchRange = 2
     
+    /// Current asset for the active page
+    private var currentAsset: YearAsset? {
+        guard currentIndex < assets.count else { return nil }
+        return assets[currentIndex]
+    }
+    
     /// Assets that haven't been trashed
     private var visibleAssets: [YearAsset] {
         assets.filter { !trashService.isTrashed($0.id) }
@@ -34,9 +40,14 @@ struct MediaViewerView: View {
     /// Current visible index (accounting for trashed items)
     private var currentVisibleIndex: Int {
         // Find the position of current asset in visible list
-        guard currentIndex < assets.count else { return 0 }
-        let currentAsset = assets[currentIndex]
+        guard let currentAsset else { return 0 }
         return visibleAssets.firstIndex(where: { $0.id == currentAsset.id }) ?? 0
+    }
+    
+    /// Whether the active page is already in the in-app trash
+    private var isCurrentAssetTrashed: Bool {
+        guard let currentAsset else { return false }
+        return trashService.isTrashed(currentAsset.id)
     }
     
     init(assets: [YearAsset], startIndex: Int, year: Int, permissionService: PhotoPermissionService) {
@@ -98,7 +109,8 @@ struct MediaViewerView: View {
                             .font(.system(size: 16, weight: .medium))
                             .foregroundStyle(.white.opacity(0.8))
                     }
-                    .accessibilityLabel("Move to Trash")
+                    .disabled(isCurrentAssetTrashed)
+                    .accessibilityLabel(isCurrentAssetTrashed ? "Already in Trash" : "Move to Trash")
                 }
             }
         }
@@ -130,26 +142,27 @@ struct MediaViewerView: View {
     private var pagingContent: some View {
         TabView(selection: $currentIndex) {
             ForEach(Array(assets.enumerated()), id: \.element.id) { index, asset in
-                Group {
-                    if trashService.isTrashed(asset.id) {
-                        // Keep page to maintain stable indices; render transparent
-                        Color.clear
-                    } else {
-                        MediaPageView(
-                            asset: asset,
-                            isCurrentPage: index == currentIndex
-                        )
-                        .swipeToTrash(isEnabled: true) {
-                            trashItem(at: index)
-                        }
-                    }
-                }
-                .tag(index)
-                .allowsHitTesting(!trashService.isTrashed(asset.id))
+                pageView(for: index, asset: asset)
+                    .tag(index)
             }
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
         .ignoresSafeArea()
+    }
+
+    private func pageView(for index: Int, asset: YearAsset) -> some View {
+        let isTrashed = trashService.isTrashed(asset.id)
+        
+        return MediaPageView(
+            asset: asset,
+            isCurrentPage: index == currentIndex,
+            isTrashed: isTrashed
+        ) {
+            trashService.restore(asset.id)
+        }
+        .swipeToTrash(isEnabled: !isTrashed) {
+            trashItem(at: index)
+        }
     }
     
     // MARK: - Counter View
@@ -158,6 +171,10 @@ struct MediaViewerView: View {
         Group {
             if visibleAssets.isEmpty {
                 Text("Done")
+                    .font(Typography.subheadline)
+                    .foregroundStyle(.white.opacity(0.9))
+            } else if isCurrentAssetTrashed {
+                Text("Marked for deletion")
                     .font(Typography.subheadline)
                     .foregroundStyle(.white.opacity(0.9))
             } else {

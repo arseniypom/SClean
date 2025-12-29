@@ -11,6 +11,7 @@ struct HomeView: View {
     @ObservedObject var permissionService: PhotoPermissionService
     @StateObject private var libraryService = PhotoLibraryService()
     @StateObject private var trashService = TrashService.shared
+    @StateObject private var statsService = StatsService.shared
     
     @State private var hasAppeared = false
     @State private var cachedYears: [YearBucket] = []
@@ -23,7 +24,15 @@ struct HomeView: View {
                 
                 content
             }
-            .navigationTitle("Years")
+            .overlay(alignment: .bottomLeading) {
+                // Floating trash button (bottom-left)
+                if trashService.trashCount > 0 {
+                    floatingTrashButton
+                        .padding(.leading, Spacing.md)
+                        .padding(.bottom, Spacing.lg)
+                }
+            }
+            .navigationTitle("SClean")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
@@ -100,6 +109,11 @@ struct HomeView: View {
     private func yearsList(_ years: [YearBucket]) -> some View {
         ScrollView {
             LazyVStack(spacing: Spacing.sm) {
+                // Stats card (always visible)
+                StatsCardView(statsService: statsService)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.top, Spacing.xs)
+                
                 // Limited access banner
                 if permissionService.status.isLimited {
                     InfoBanner(
@@ -110,8 +124,17 @@ struct HomeView: View {
                         permissionService.presentLimitedLibraryPicker()
                     }
                     .padding(.horizontal, Spacing.md)
-                    .padding(.top, Spacing.xs)
                 }
+                
+                // Years section header
+                HStack {
+                    Text("Years")
+                        .font(Typography.title2)
+                        .foregroundStyle(Color.scTextPrimary)
+                    Spacer()
+                }
+                .padding(.horizontal, Spacing.md)
+                .padding(.top, Spacing.sm)
                 
                 // Year cards
                 ForEach(years) { bucket in
@@ -127,28 +150,39 @@ struct HomeView: View {
                     .buttonStyle(.plain)
                     .padding(.horizontal, Spacing.md)
                 }
-
-                // Trash card (only show if there are trashed items)
+                
+                // Bottom spacer for floating button
                 if trashService.trashCount > 0 {
-                    NavigationLink {
-                        TrashViewWithNavigation(permissionService: permissionService)
-                    } label: {
-                        TrashCardContent(count: trashService.trashCount)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, Spacing.md)
-                    .padding(.top, Spacing.sm)
-
-                    // Trust messaging near Trash card
-                    Text("Nothing is deleted until you Empty Trash")
-                        .font(Typography.caption2)
-                        .foregroundStyle(Color.scTextDisabled)
-                        .padding(.horizontal, Spacing.md)
-                        .padding(.top, Spacing.xxs)
+                    Color.clear
+                        .frame(height: 80)
                 }
             }
             .padding(.vertical, Spacing.sm)
         }
+    }
+    
+    // MARK: - Floating Trash Button
+    
+    private var floatingTrashButton: some View {
+        NavigationLink {
+            TrashViewWithNavigation(permissionService: permissionService)
+        } label: {
+            floatingTrashButtonContent
+        }
+    }
+    
+    private var floatingTrashButtonContent: some View {
+        HStack(spacing: Spacing.xs) {
+            Image(systemName: "trash")
+                .font(.system(size: 18, weight: .semibold))
+            
+            Text("\(trashService.trashCount)")
+                .font(.system(size: 16, weight: .bold, design: .rounded))
+        }
+        .foregroundStyle(Color.scTextPrimary)
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
+        .scFloatingButtonStyle()
     }
     
     private func loadData() {

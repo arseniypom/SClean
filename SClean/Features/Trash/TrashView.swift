@@ -45,7 +45,7 @@ struct TrashView: View {
                 content
             }
             
-            // Selection mode action bar
+            // Floating action bar/button
             if isSelectionMode && !selectedIDs.isEmpty {
                 selectionActionBar
             }
@@ -297,6 +297,7 @@ struct TrashViewWithNavigation: View {
     @ObservedObject var permissionService: PhotoPermissionService
     @StateObject private var trashService = TrashService.shared
     @StateObject private var deletionService = DeletionService.shared
+    @StateObject private var statsService = StatsService.shared
     
     @State private var isSelectionMode = false
     @State private var selectedIDs: Set<String> = []
@@ -325,9 +326,11 @@ struct TrashViewWithNavigation: View {
                 mainContent
             }
             
-            // Selection action bar
+            // Floating action bar or button
             if isSelectionMode && !selectedIDs.isEmpty {
                 selectionActionBar
+            } else if trashService.trashCount > 0 && !isDeleting {
+                floatingEmptyTrashButton
             }
             
             // Deletion progress overlay
@@ -453,14 +456,9 @@ struct TrashViewWithNavigation: View {
                     }
                     .padding(.horizontal, 2)
                     
-                    if isSelectionMode {
-                        Color.clear.frame(height: 100)
-                    }
+                    // Bottom spacer for floating button
+                    Color.clear.frame(height: 100)
                 }
-            }
-            
-            if !isSelectionMode {
-                emptyTrashButton
             }
         }
     }
@@ -504,22 +502,36 @@ struct TrashViewWithNavigation: View {
         .padding(Spacing.xl)
     }
     
-    // MARK: - Empty Trash Button
+    // MARK: - Floating Empty Trash Button
     
-    private var emptyTrashButton: some View {
-        VStack(spacing: Spacing.xs) {
-            SCButton("Empty Trash", icon: "trash", style: .primary) {
-                showConfirmation = true
-            }
-            .padding(.horizontal, Spacing.md)
-            .disabled(trashService.trashCount == 0 || isDeleting)
+    private var floatingEmptyTrashButton: some View {
+        VStack {
+            Spacer()
             
-            Text("Moves items to Photos → Recently Deleted")
-                .font(Typography.caption2)
-                .foregroundStyle(Color.scTextDisabled)
+            HStack {
+                Spacer()
+                
+                Button {
+                    showConfirmation = true
+                } label: {
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 18, weight: .semibold))
+                        
+                        Text("Empty Trash")
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                    }
+                    .foregroundStyle(Color.scError)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.vertical, Spacing.sm)
+                    .scFloatingButtonStyle()
+                }
+                .disabled(trashService.trashCount == 0 || isDeleting)
+                
+                Spacer()
+            }
+            .padding(.bottom, Spacing.lg)
         }
-        .padding(.vertical, Spacing.md)
-        .background(Color.scBackground)
     }
     
     // MARK: - Selection Action Bar
@@ -631,6 +643,9 @@ struct TrashViewWithNavigation: View {
         isDeleting = true
         
         Task {
+            // Calculate total bytes before deletion
+            let totalBytes = await calculateTotalBytes(for: assetIDsToDelete)
+            
             // Perform the deletion
             let result = await deletionService.deleteAssets(assetIDsToDelete)
             
@@ -640,6 +655,17 @@ struct TrashViewWithNavigation: View {
                 let failedSet = Set(result.failedIDs)
                 let deletedIDs = assetIDsToDelete.filter { !failedSet.contains($0) }
                 trashService.markDeleted(deletedIDs)
+                
+                // Record stats - estimate bytes proportionally if partial success
+                let bytesDeleted: Int64
+                if result.isFullSuccess {
+                    bytesDeleted = totalBytes
+                } else {
+                    // Proportional estimate for partial deletions
+                    let ratio = Double(result.deletedCount) / Double(assetIDsToDelete.count)
+                    bytesDeleted = Int64(Double(totalBytes) * ratio)
+                }
+                statsService.recordDeletion(count: result.deletedCount, bytes: bytesDeleted)
             }
             
             isDeleting = false
@@ -650,6 +676,25 @@ struct TrashViewWithNavigation: View {
                 showResult = true
             }
         }
+    }
+    
+    /// Calculate total bytes for given asset IDs
+    private func calculateTotalBytes(for assetIDs: [String]) async -> Int64 {
+        await Task.detached(priority: .userInitiated) {
+            let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: assetIDs, options: nil)
+            var total: Int64 = 0
+            
+            fetchResult.enumerateObjects { asset, _, _ in
+                let resources = PHAssetResource.assetResources(for: asset)
+                for resource in resources {
+                    if let size = resource.value(forKey: "fileSize") as? Int64 {
+                        total += size
+                    }
+                }
+            }
+            
+            return total
+        }.value
     }
 }
 

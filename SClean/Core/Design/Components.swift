@@ -39,18 +39,18 @@ extension View {
     }
     
     /// Floating action button surface - Liquid Glass on iOS 26+, elevated surface on older
-    /// Use for: FABs, floating controls
+    /// Use for: FABs, floating controls (capsule/pill shape)
     @ViewBuilder
     func scFloatingButtonStyle() -> some View {
         if #available(iOS 26.0, *) {
             self
                 .glassEffect()
-            } else {
+        } else {
             self
-                .background(Color.scSurface)
-                .clipShape(Circle())
+                .background(Color.scSurfaceElevated)
+                .clipShape(Capsule())
                 .scShadow(.subtle)
-            }
+        }
     }
 }
 
@@ -278,6 +278,93 @@ struct TrashCardContent: View {
     }
 }
 
+// MARK: - Stats Card
+
+/// Beautiful infographic showing deletion stats
+struct StatsCardView: View {
+    @ObservedObject var statsService: StatsService
+    
+    var body: some View {
+        HStack(spacing: 0) {
+            // Media deleted stat
+            StatBlock(
+                value: statsService.formattedMediaCount,
+                label: "Media Deleted",
+                icon: "photo.stack",
+                color: .scBlade
+            )
+            
+            // Divider
+            Rectangle()
+                .fill(Color.scBorder)
+                .frame(width: 1)
+                .padding(.vertical, Spacing.md)
+            
+            // Storage saved stat
+            StatBlock(
+                value: statsService.formattedBytesSaved,
+                unit: statsService.bytesSavedUnit,
+                label: "Storage Saved",
+                icon: "externaldrive",
+                color: Color.scSuccess
+            )
+        }
+        .padding(.vertical, Spacing.sm)
+        .scCardStyle()
+    }
+}
+
+/// Individual stat block within StatsCard
+private struct StatBlock: View {
+    let value: String
+    let unit: String?
+    let label: String
+    let icon: String
+    let color: Color
+    
+    init(value: String, unit: String? = nil, label: String, icon: String, color: Color) {
+        self.value = value
+        self.unit = unit
+        self.label = label
+        self.icon = icon
+        self.color = color
+    }
+    
+    var body: some View {
+        VStack(spacing: Spacing.xs) {
+            // Icon with accent background
+            ZStack {
+                Circle()
+                    .fill(color.opacity(0.12))
+                    .frame(width: 36, height: 36)
+                
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(color)
+            }
+            
+            // Value
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                Text(value)
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.scTextPrimary)
+                
+                if let unit {
+                    Text(unit)
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.scTextSecondary)
+                }
+            }
+            
+            // Label
+            Text(label)
+                .font(Typography.caption1)
+                .foregroundStyle(Color.scTextSecondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
 // MARK: - Empty State
 
 struct EmptyStateView: View {
@@ -491,4 +578,10 @@ struct InfoBanner: View {
     }
     .padding()
     .background(Color.scBackground)
+}
+
+#Preview("Stats Card") {
+    StatsCardView(statsService: StatsService.shared)
+        .padding()
+        .background(Color.scBackground)
 }

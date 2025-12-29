@@ -10,6 +10,20 @@ import SwiftUI
 struct MediaPageView: View {
     let asset: YearAsset
     let isCurrentPage: Bool
+    let isTrashed: Bool
+    let onUndoTrash: (() -> Void)?
+    
+    init(
+        asset: YearAsset,
+        isCurrentPage: Bool,
+        isTrashed: Bool = false,
+        onUndoTrash: (() -> Void)? = nil
+    ) {
+        self.asset = asset
+        self.isCurrentPage = isCurrentPage
+        self.isTrashed = isTrashed
+        self.onUndoTrash = onUndoTrash
+    }
     
     @State private var image: UIImage?
     @State private var isLoading = true
@@ -46,6 +60,9 @@ struct MediaPageView: View {
             if isCurrent && image == nil && asset.mediaType != .video {
                 loadImage()
             }
+        }
+        .overlay {
+            trashedOverlay
         }
     }
     
@@ -111,6 +128,38 @@ struct MediaPageView: View {
         .accessibilityLabel("Can't load this item. Swipe to skip.")
     }
     
+    // MARK: - Trashed Overlay
+    
+    @ViewBuilder
+    private var trashedOverlay: some View {
+        if isTrashed, let onUndoTrash {
+            VStack(spacing: Spacing.sm) {
+                Image(systemName: "trash")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.white)
+                
+                Text("Marked for deletion")
+                    .font(Typography.callout)
+                    .foregroundStyle(.white)
+                
+                Text("This item will be removed when you empty the Trash.")
+                    .font(Typography.caption1)
+                    .foregroundStyle(.white.opacity(0.8))
+                    .multilineTextAlignment(.center)
+                
+                SCButton("Undo", icon: "arrow.uturn.backward", style: .primary) {
+                    withAnimation(.easeOut(duration: AnimationDuration.fast)) {
+                        onUndoTrash()
+                    }
+                }
+            }
+            .frame(maxWidth: 280)
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.md)
+            .scControlSurface()
+        }
+    }
+    
     // MARK: - Image Loading
     
     private func loadImage() {
@@ -150,4 +199,3 @@ struct MediaPageView: View {
         isCurrentPage: true
     )
 }
-
