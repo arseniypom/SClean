@@ -433,17 +433,12 @@ struct LoadingStateView: View {
             }
 
             // Progress bar - minimal, precise
-            if showsProgressBar {
-                Group {
-                    if let progress {
-                        ProgressView(value: progress)
-                    } else {
-                        ProgressView()
-                    }
-                }
-                .progressViewStyle(.linear)
-                .tint(.scTextPrimary)
-                .frame(maxWidth: 240)
+            if showsProgressBar, let progress {
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .tint(.scTextPrimary)
+                    .frame(maxWidth: 240)
+                    .animation(.linear(duration: 0.15), value: progress)
             }
         }
         .padding(.vertical, Spacing.xl)
