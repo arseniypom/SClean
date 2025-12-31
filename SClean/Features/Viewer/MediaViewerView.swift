@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Photos
 
 struct MediaViewerView: View {
     let assets: [YearAsset]
@@ -21,6 +22,7 @@ struct MediaViewerView: View {
     @State private var hasSeenTrashHint: Bool
     @State private var swipeCount: Int = 0
     @State private var showTrashTip: Bool = false
+    @State private var currentAssetSize: Int64?
     @Environment(\.dismiss) private var dismiss
     
     /// Number of items to prefetch in each direction
@@ -117,9 +119,11 @@ struct MediaViewerView: View {
         .statusBarHidden(false)
         .onAppear {
             prefetchAdjacent()
+            fetchCurrentAssetSize()
         }
         .onChange(of: currentIndex) { _, _ in
             prefetchAdjacent()
+            fetchCurrentAssetSize()
             // Count browsing swipes
             swipeCount += 1
             if !hasSeenTrashHint && !showTrashTip && swipeCount >= 8 {
@@ -166,9 +170,9 @@ struct MediaViewerView: View {
     }
     
     // MARK: - Counter View
-    
+
     private var counterView: some View {
-        Group {
+        VStack(spacing: 2) {
             if visibleAssets.isEmpty {
                 Text("Done")
                     .font(Typography.subheadline)
@@ -182,6 +186,71 @@ struct MediaViewerView: View {
                     .font(Typography.subheadline)
                     .foregroundStyle(.white.opacity(0.9))
                     .monospacedDigit()
+
+                // Metadata line: date and size
+                if let asset = currentAsset {
+                    metadataText(for: asset)
+                }
+            }
+        }
+    }
+
+    private func metadataText(for asset: YearAsset) -> some View {
+        let dateText = formattedDate(asset.creationDate)
+        let sizeText = currentAssetSize.map { formattedSize($0) }
+
+        return Group {
+            if let sizeText {
+                Text("\(dateText) · \(sizeText)")
+            } else {
+                Text(dateText)
+            }
+        }
+        .font(Typography.caption2)
+        .foregroundStyle(.white.opacity(0.6))
+    }
+
+    private func formattedDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
+    }
+
+    private func formattedSize(_ bytes: Int64) -> String {
+        let mb = Double(bytes) / 1_048_576
+        let gb = Double(bytes) / 1_073_741_824
+
+        if gb >= 1.0 {
+            return String(format: "%.1f GB", gb)
+        } else if mb >= 0.1 {
+            return String(format: "%.1f MB", mb)
+        } else {
+            return "< 0.1 MB"
+        }
+    }
+
+    private func fetchCurrentAssetSize() {
+        currentAssetSize = nil
+        guard let asset = currentAsset else { return }
+
+        Task.detached(priority: .userInitiated) {
+            let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [asset.id], options: nil)
+            guard let phAsset = fetchResult.firstObject else { return }
+
+            let resources = PHAssetResource.assetResources(for: phAsset)
+            let totalSize = resources.reduce(Int64(0)) { sum, resource in
+                if let size = resource.value(forKey: "fileSize") as? Int64 {
+                    return sum + size
+                }
+                return sum
+            }
+
+            await MainActor.run {
+                // Only update if still on the same asset
+                if self.currentAsset?.id == asset.id {
+                    self.currentAssetSize = totalSize > 0 ? totalSize : nil
+                }
             }
         }
     }

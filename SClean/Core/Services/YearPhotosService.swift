@@ -64,26 +64,28 @@ nonisolated enum YearPhotosState: Equatable, Sendable {
 
 @MainActor
 final class YearPhotosService: ObservableObject {
-    
+
     let year: Int
-    
+
     @Published private(set) var state: YearPhotosState = .idle
-    
+    @Published var sortOrder: SortOrder = .newestFirst
+
     init(year: Int) {
         self.year = year
     }
     
     // MARK: - Public Methods
-    
-    /// Fetches all photos for the given year, oldest first
+
+    /// Fetches all photos for the given year
     func fetchPhotos() async {
         state = .loading
-        
+
         let year = self.year
+        let ascending = sortOrder.isAscending
         let assets = await Task.detached(priority: .userInitiated) {
-            Self.fetchAssetsForYear(year)
+            Self.fetchAssetsForYear(year, ascending: ascending)
         }.value
-        
+
         if assets.isEmpty {
             state = .empty
         } else {
@@ -93,7 +95,7 @@ final class YearPhotosService: ObservableObject {
     
     // MARK: - Private Methods
     
-    private nonisolated static func fetchAssetsForYear(_ year: Int) -> [YearAsset] {
+    private nonisolated static func fetchAssetsForYear(_ year: Int, ascending: Bool) -> [YearAsset] {
         // Create date range for the year
         var startComponents = DateComponents()
         startComponents.year = year
@@ -125,7 +127,7 @@ final class YearPhotosService: ObservableObject {
             endDate as NSDate
         )
         fetchOptions.sortDescriptors = [
-            NSSortDescriptor(key: "creationDate", ascending: true)
+            NSSortDescriptor(key: "creationDate", ascending: ascending)
         ]
         fetchOptions.includeHiddenAssets = false
         fetchOptions.includeAllBurstAssets = false

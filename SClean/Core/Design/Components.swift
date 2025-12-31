@@ -279,90 +279,65 @@ struct TrashCardContent: View {
     }
 }
 
-// MARK: - Stats Card
+// MARK: - Stats Cards
 
-/// Beautiful infographic showing deletion stats
+/// Two side-by-side stat cards showing deletion stats
 struct StatsCardView: View {
     @ObservedObject var statsService: StatsService
-    
+
     var body: some View {
-        HStack(spacing: 0) {
-            // Media deleted stat
-            StatBlock(
+        HStack(spacing: Spacing.sm) {
+            // Media deleted card
+            StatCard(
                 value: statsService.formattedMediaCount,
-                label: "Media Deleted",
-                icon: "photo.stack",
-                color: .scTextPrimary
+                label: "Media Deleted"
             )
-            
-            // Divider
-            Rectangle()
-                .fill(Color.scBorder)
-                .frame(width: 1)
-                .padding(.vertical, Spacing.md)
-            
-            // Storage saved stat
-            StatBlock(
+
+            // Storage saved card
+            StatCard(
                 value: statsService.formattedBytesSaved,
                 unit: statsService.bytesSavedUnit,
-                label: "Storage Saved",
-                icon: "externaldrive",
-                color: Color.scSuccess
+                label: "Space Saved"
             )
         }
-        .padding(.vertical, Spacing.sm)
-        .scCardStyle()
     }
 }
 
-/// Individual stat block within StatsCard
-private struct StatBlock: View {
+/// Individual stat card - big number, small label
+private struct StatCard: View {
     let value: String
     let unit: String?
     let label: String
-    let icon: String
-    let color: Color
-    
-    init(value: String, unit: String? = nil, label: String, icon: String, color: Color) {
+
+    init(value: String, unit: String? = nil, label: String) {
         self.value = value
         self.unit = unit
         self.label = label
-        self.icon = icon
-        self.color = color
     }
-    
+
     var body: some View {
-        VStack(spacing: Spacing.xs) {
-            // Icon with accent background
-            ZStack {
-                Circle()
-                    .fill(color.opacity(0.12))
-                    .frame(width: 36, height: 36)
-                
-                Image(systemName: icon)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(color)
-            }
-            
-            // Value
+        VStack(spacing: Spacing.xxs) {
+            // Big number with optional unit
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text(value)
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .font(.system(size: 44, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.scTextPrimary)
-                
+
                 if let unit {
                     Text(unit)
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .font(.system(size: 20, weight: .semibold, design: .rounded))
                         .foregroundStyle(Color.scTextSecondary)
                 }
             }
-            
+
             // Label
             Text(label)
-                .font(Typography.caption1)
+                .font(Typography.subheadline)
                 .foregroundStyle(Color.scTextSecondary)
         }
         .frame(maxWidth: .infinity)
+        .padding(.vertical, Spacing.md)
+        .scCardStyle()
     }
 }
 

@@ -129,33 +129,44 @@ struct MediaPageView: View {
     }
     
     // MARK: - Trashed Overlay
-    
+
     @ViewBuilder
     private var trashedOverlay: some View {
         if isTrashed, let onUndoTrash {
-            VStack(spacing: Spacing.sm) {
+            VStack(spacing: Spacing.md) {
                 Image(systemName: "trash")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(.white)
-                
-                Text("Marked for deletion")
-                    .font(Typography.callout)
-                    .foregroundStyle(.white)
-                
-                Text("This item will be removed when you empty the Trash.")
-                    .font(Typography.caption1)
-                    .foregroundStyle(.white.opacity(0.8))
-                    .multilineTextAlignment(.center)
-                
-                SCButton("Undo", icon: "arrow.uturn.backward", style: .primary) {
+                    .font(.system(size: 24, weight: .medium))
+
+                VStack(spacing: Spacing.xs) {
+                    Text("Marked for deletion")
+                        .font(Typography.headline)
+
+                    Text("This item will be removed when you empty the Trash.")
+                        .font(Typography.caption1)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                Button {
                     withAnimation(.easeOut(duration: AnimationDuration.fast)) {
                         onUndoTrash()
                     }
+                } label: {
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "arrow.uturn.backward")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("Undo")
+                            .font(Typography.headline)
+                    }
+                    .padding(.vertical, Spacing.sm)
+                    .padding(.horizontal, Spacing.lg)
+                    .background(.fill.tertiary)
+                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
                 }
+                .buttonStyle(.plain)
             }
+            .padding(Spacing.lg)
             .frame(maxWidth: 280)
-            .padding(.horizontal, Spacing.lg)
-            .padding(.vertical, Spacing.md)
             .scControlSurface()
         }
     }

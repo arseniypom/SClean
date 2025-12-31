@@ -14,6 +14,11 @@ struct YearGridView: View {
     
     @StateObject private var photosService: YearPhotosService
     @State private var hasAppeared = false
+    @AppStorage(SortOrder.storageKey) private var sortOrderRaw: String = SortOrder.newestFirst.rawValue
+
+    private var sortOrder: SortOrder {
+        SortOrder.from(raw: sortOrderRaw)
+    }
     
     // Grid layout: 3 columns with small spacing
     private let columns = [
@@ -38,9 +43,20 @@ struct YearGridView: View {
         }
         .navigationTitle(String(year))
         .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    toggleSortOrder()
+                } label: {
+                    Image(systemName: sortOrder.iconName)
+                }
+                .accessibilityLabel("Sort \(sortOrder.title)")
+            }
+        }
         .onAppear {
             if !hasAppeared {
                 hasAppeared = true
+                photosService.sortOrder = sortOrder
                 loadPhotos()
             }
         }
@@ -197,7 +213,14 @@ struct YearGridView: View {
     }
     
     // MARK: - Actions
-    
+
+    private func toggleSortOrder() {
+        let newOrder: SortOrder = sortOrder == .newestFirst ? .oldestFirst : .newestFirst
+        sortOrderRaw = newOrder.rawValue
+        photosService.sortOrder = newOrder
+        loadPhotos()
+    }
+
     private func loadPhotos() {
         Task {
             await photosService.fetchPhotos()
