@@ -5,12 +5,12 @@
 //  Persists lightweight photo library index to avoid full reindex on launch.
 //
 
-import Foundation
+@preconcurrency import Foundation
 
 // MARK: - Indexed Asset
 
 /// Cached metadata for a photo/video asset
-struct IndexedAsset: Codable, Equatable, Identifiable, Sendable {
+nonisolated struct IndexedAsset: Codable, Equatable, Identifiable, Sendable {
     let id: String // PHAsset localIdentifier
     let year: Int
     let byteSize: Int64
@@ -19,53 +19,50 @@ struct IndexedAsset: Codable, Equatable, Identifiable, Sendable {
 
 // MARK: - Library Index Snapshot
 
-struct LibraryIndexSnapshot: Equatable, Sendable {
+nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
     static let currentVersion = 1
-    
+
     let version: Int
     let lastIndexedAt: Date
     let assets: [IndexedAsset]
-    
+
+    private enum CodingKeys: String, CodingKey {
+        case version, lastIndexedAt, assets
+    }
+
     init(version: Int = Self.currentVersion, lastIndexedAt: Date, assets: [IndexedAsset]) {
         self.version = version
         self.lastIndexedAt = lastIndexedAt
         self.assets = assets
     }
-    
-    /// Aggregated buckets for UI
-    var yearBuckets: [YearBucket] {
-        guard !assets.isEmpty else { return [] }
-        
-        var counts: [Int: (count: Int, bytes: Int64)] = [:]
-        for asset in assets {
-            let current = counts[asset.year, default: (0, 0)]
-            counts[asset.year] = (current.count + 1, current.bytes + asset.byteSize)
-        }
-        
-        return counts
-            .map { YearBucket(year: $0.key, count: $0.value.count, totalBytes: $0.value.bytes) }
-            .sorted { $0.year > $1.year }
-    }
-}
 
-// Manual Codable conformance to avoid main actor isolation inference
-extension LibraryIndexSnapshot: Codable {
-    private enum CodingKeys: String, CodingKey {
-        case version, lastIndexedAt, assets
-    }
-    
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.version = try container.decode(Int.self, forKey: .version)
         self.lastIndexedAt = try container.decode(Date.self, forKey: .lastIndexedAt)
         self.assets = try container.decode([IndexedAsset].self, forKey: .assets)
     }
-    
+
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(version, forKey: .version)
         try container.encode(lastIndexedAt, forKey: .lastIndexedAt)
         try container.encode(assets, forKey: .assets)
+    }
+
+    /// Aggregated buckets for UI
+    var yearBuckets: [YearBucket] {
+        guard !assets.isEmpty else { return [] }
+
+        var counts: [Int: (count: Int, bytes: Int64)] = [:]
+        for asset in assets {
+            let current = counts[asset.year, default: (0, 0)]
+            counts[asset.year] = (current.count + 1, current.bytes + asset.byteSize)
+        }
+
+        return counts
+            .map { YearBucket(year: $0.key, count: $0.value.count, totalBytes: $0.value.bytes) }
+            .sorted { $0.year > $1.year }
     }
 }
 
