@@ -395,28 +395,22 @@ struct EmptyStateView: View {
 struct LoadingStateView: View {
     let message: String
     let detail: String?
-    let showsProgressBar: Bool
-    let progress: Double?
-    
+
     init(
         message: String,
-        detail: String? = nil,
-        showsProgressBar: Bool = false,
-        progress: Double? = nil
+        detail: String? = nil
     ) {
         self.message = message
         self.detail = detail
-        self.showsProgressBar = showsProgressBar
-        self.progress = progress
     }
-    
+
     var body: some View {
         VStack(spacing: Spacing.lg) {
             // Spinner
             ProgressView()
                 .scaleEffect(1.0)
                 .tint(.scTextPrimary)
-            
+
             // Main message - primary, bold
             Text(message)
                 .font(Typography.headline)
@@ -431,17 +425,90 @@ struct LoadingStateView: View {
                     .multilineTextAlignment(.center)
                     .padding(.top, -Spacing.xs)
             }
+        }
+        .padding(.vertical, Spacing.xl)
+    }
+}
 
-            // Progress bar - minimal, precise
-            if showsProgressBar, let progress {
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
-                    .tint(.scTextPrimary)
-                    .frame(maxWidth: 240)
-                    .animation(.linear(duration: 0.15), value: progress)
+// MARK: - Indexing Progress View (Big Number Design)
+
+struct IndexingProgressView: View {
+    let progress: Double?
+    let detail: String?
+
+    @State private var displayedProgress: Double = 0
+    @State private var isCompleting: Bool = false
+
+    init(progress: Double?, detail: String? = nil) {
+        self.progress = progress
+        self.detail = detail
+    }
+
+    private var percentageText: String {
+        let percent = Int(displayedProgress * 100)
+        return "\(percent)%"
+    }
+
+    var body: some View {
+        VStack(spacing: Spacing.lg) {
+            // Subtle label
+            Text("Indexing")
+                .font(Typography.subheadline)
+                .foregroundStyle(Color.scTextSecondary)
+
+            // Big percentage number
+            Text(percentageText)
+                .font(.system(size: 80, weight: .bold, design: .rounded))
+                .foregroundStyle(Color.scTextPrimary)
+                .contentTransition(.numericText())
+                .animation(.spring(response: 0.3, dampingFraction: 0.8), value: displayedProgress)
+
+            // Thick progress bar
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    // Background track
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Color.scTextPrimary.opacity(0.12))
+
+                    // Fill
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Color.scTextPrimary)
+                        .frame(width: geometry.size.width * displayedProgress)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.9), value: displayedProgress)
+                }
+            }
+            .frame(maxWidth: 280, maxHeight: 6)
+
+            // Detail text
+            if let detail {
+                Text(detail)
+                    .font(Typography.caption2)
+                    .foregroundStyle(Color.scTextDisabled)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, Spacing.xs)
             }
         }
         .padding(.vertical, Spacing.xl)
+        .onChange(of: progress) { _, newValue in
+            if let newProgress = newValue {
+                // Only update if new progress is greater (prevents jumps backward)
+                if newProgress > displayedProgress {
+                    displayedProgress = newProgress
+                }
+            } else if !isCompleting {
+                // Progress became nil — animate to 100% smoothly
+                isCompleting = true
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    displayedProgress = 1.0
+                }
+            }
+        }
+        .onAppear {
+            // Initialize with current progress
+            if let progress {
+                displayedProgress = progress
+            }
+        }
     }
 }
 

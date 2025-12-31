@@ -72,11 +72,9 @@ struct HomeView: View {
         switch libraryService.state {
         case .idle, .loading:
             if cachedYears.isEmpty {
-                LoadingStateView(
-                    message: "Indexing years…",
-                    detail: "Runs in the background and may take a moment the first time.",
-                    showsProgressBar: true,
-                    progress: libraryService.indexingProgress
+                IndexingProgressView(
+                    progress: libraryService.indexingProgress,
+                    detail: "May take a moment the first time"
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.horizontal, Spacing.xl)
