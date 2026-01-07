@@ -168,10 +168,8 @@ struct YearGridView: View {
                                     permissionService: permissionService
                                 )
                             } label: {
-                                gridCell(for: asset)
-                                    .frame(width: side, height: side)
+                                gridCell(for: asset, size: side)
                                     .contentShape(Rectangle())
-                                    .clipped()
                             }
                             .buttonStyle(.plain)
                         }
@@ -185,19 +183,20 @@ struct YearGridView: View {
     // MARK: - Grid Cell
     
     @ViewBuilder
-    private func gridCell(for asset: YearAsset) -> some View {
+    private func gridCell(for asset: YearAsset, size: CGFloat) -> some View {
         let isTrashed = trashService.isTrashed(asset.id)
 
         ThumbnailImageView(assetID: asset.id)
             .opacity(isTrashed ? 0.5 : 1.0)
+            .frame(width: size, height: size)
+            .clipped()
+            // Overlays applied AFTER frame/clip so they use fixed bounds
             .overlay(alignment: .bottomTrailing) {
-                // Video duration badge
                 if asset.isVideo {
                     videoDurationBadge(duration: asset.duration)
                 }
             }
             .overlay(alignment: .bottomLeading) {
-                // Trash indicator
                 if isTrashed {
                     trashedBadge
                 }
