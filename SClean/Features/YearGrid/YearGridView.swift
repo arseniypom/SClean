@@ -13,6 +13,7 @@ struct YearGridView: View {
     @ObservedObject var permissionService: PhotoPermissionService
     
     @StateObject private var photosService: YearPhotosService
+    @ObservedObject private var trashService = TrashService.shared
     @State private var hasAppeared = false
     @AppStorage(SortOrder.storageKey) private var sortOrderRaw: String = SortOrder.newestFirst.rawValue
 
@@ -185,16 +186,24 @@ struct YearGridView: View {
     
     @ViewBuilder
     private func gridCell(for asset: YearAsset) -> some View {
-        ZStack(alignment: .bottomTrailing) {
-            ThumbnailImageView(assetID: asset.id)
-            
-            // Video duration badge
-            if asset.isVideo {
-                videoDurationBadge(duration: asset.duration)
+        let isTrashed = trashService.isTrashed(asset.id)
+
+        ThumbnailImageView(assetID: asset.id)
+            .opacity(isTrashed ? 0.5 : 1.0)
+            .overlay(alignment: .bottomTrailing) {
+                // Video duration badge
+                if asset.isVideo {
+                    videoDurationBadge(duration: asset.duration)
+                }
             }
-        }
+            .overlay(alignment: .bottomLeading) {
+                // Trash indicator
+                if isTrashed {
+                    trashedBadge
+                }
+            }
     }
-    
+
     private func videoDurationBadge(duration: TimeInterval) -> some View {
         Text(formatDuration(duration))
             .font(.system(size: 11, weight: .medium))
@@ -205,13 +214,23 @@ struct YearGridView: View {
             .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
             .padding(4)
     }
-    
+
     private func formatDuration(_ duration: TimeInterval) -> String {
         let minutes = Int(duration) / 60
         let seconds = Int(duration) % 60
         return String(format: "%d:%02d", minutes, seconds)
     }
-    
+
+    private var trashedBadge: some View {
+        Image(systemName: "trash.fill")
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(.white)
+            .padding(5)
+            .background(.black.opacity(0.6))
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .padding(4)
+    }
+
     // MARK: - Actions
 
     private func toggleSortOrder() {

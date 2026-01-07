@@ -308,6 +308,7 @@ struct TrashViewWithNavigation: View {
     @State private var isDeleting = false
     @State private var deletionResult: DeletionResult?
     @State private var showResult = false
+    @State private var showSuccessEmptyState = false
     
     private let columns = [
         GridItem(.flexible(), spacing: 2),
@@ -321,7 +322,11 @@ struct TrashViewWithNavigation: View {
                 .ignoresSafeArea()
             
             if trashService.trashCount == 0 && !isDeleting {
-                emptyState
+                if showSuccessEmptyState {
+                    successEmptyState
+                } else {
+                    emptyState
+                }
             } else {
                 mainContent
             }
@@ -487,12 +492,12 @@ struct TrashViewWithNavigation: View {
             Image(systemName: "trash")
                 .font(.system(size: 56, weight: .light))
                 .foregroundStyle(Color.scTextDisabled)
-            
+
             VStack(spacing: Spacing.xs) {
                 Text("Trash is Empty")
                     .font(Typography.title3)
                     .foregroundStyle(Color.scTextPrimary)
-                
+
                 Text("Items you swipe away will appear here for review before deletion.")
                     .font(Typography.body)
                     .foregroundStyle(Color.scTextSecondary)
@@ -501,7 +506,20 @@ struct TrashViewWithNavigation: View {
         }
         .padding(Spacing.xl)
     }
-    
+
+    private var successEmptyState: some View {
+        VStack(spacing: Spacing.lg) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 56, weight: .light))
+                .foregroundStyle(Color.scSuccess)
+
+            Text("Trash Emptied")
+                .font(Typography.title3)
+                .foregroundStyle(Color.scTextPrimary)
+        }
+        .padding(Spacing.xl)
+    }
+
     // MARK: - Floating Empty Trash Button
     
     private var floatingEmptyTrashButton: some View {
@@ -669,9 +687,18 @@ struct TrashViewWithNavigation: View {
             }
             
             isDeleting = false
-            
-            // Show result (unless user cancelled and nothing happened)
-            if result.error != .userCancelled || result.deletedCount > 0 {
+
+            // Handle result based on outcome
+            if result.isFullSuccess {
+                // Show inline success state instead of modal
+                showSuccessEmptyState = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    withAnimation(.easeOut(duration: 0.5)) {
+                        showSuccessEmptyState = false
+                    }
+                }
+            } else if result.error != .userCancelled || result.deletedCount > 0 {
+                // Show modal for errors and partial success
                 deletionResult = result
                 showResult = true
             }

@@ -92,14 +92,6 @@ struct DeletionResultView: View {
                 .font(Typography.body)
                 .foregroundStyle(Color.scTextSecondary)
                 .multilineTextAlignment(.center)
-            
-            if let errorMessage = result.error?.localizedDescription, result.isFailure {
-                Text(errorMessage)
-                    .font(Typography.caption1)
-                    .foregroundStyle(Color.scError)
-                    .multilineTextAlignment(.center)
-                    .padding(.top, Spacing.xs)
-            }
         }
         .padding(.horizontal, Spacing.md)
     }
