@@ -8,6 +8,15 @@
 import SwiftUI
 import Photos
 
+// MARK: - Trash Icon Position Key
+
+private struct TrashIconPositionKey: PreferenceKey {
+    static var defaultValue: CGPoint = .zero
+    static func reduce(value: inout CGPoint, nextValue: () -> CGPoint) {
+        value = nextValue()
+    }
+}
+
 struct MediaViewerView: View {
     let assets: [YearAsset]
     let startIndex: Int
@@ -23,6 +32,8 @@ struct MediaViewerView: View {
     @State private var swipeCount: Int = 0
     @State private var showTrashTip: Bool = false
     @State private var currentAssetSize: Int64?
+    @State private var isTrashAnimating = false
+    @State private var trashIconPosition: CGPoint = .zero
     @Environment(\.dismiss) private var dismiss
     
     /// Number of items to prefetch in each direction
@@ -101,20 +112,45 @@ struct MediaViewerView: View {
                 counterView
             }
             
-            // Trash button (accessibility fallback)
+            // Trash icon - opens trash screen
             ToolbarItem(placement: .topBarTrailing) {
-                if !visibleAssets.isEmpty {
-                    Button {
-                        trashCurrentItem()
-                    } label: {
+                NavigationLink {
+                    TrashViewWithNavigation(permissionService: permissionService)
+                } label: {
+                    ZStack(alignment: .topTrailing) {
                         Image(systemName: "trash")
                             .font(.system(size: 16, weight: .medium))
                             .foregroundStyle(.white.opacity(0.8))
+
+                        // Badge
+                        if trashService.trashCount > 0 {
+                            Text("\(trashService.trashCount)")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Color.red)
+                                .clipShape(Capsule())
+                                .offset(x: 8, y: -6)
+                        }
                     }
-                    .disabled(isCurrentAssetTrashed)
-                    .accessibilityLabel(isCurrentAssetTrashed ? "Already in Trash" : "Move to Trash")
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: TrashIconPositionKey.self,
+                                value: CGPoint(
+                                    x: geo.frame(in: .global).midX,
+                                    y: geo.frame(in: .global).midY
+                                )
+                            )
+                        }
+                    )
                 }
+                .accessibilityLabel("Trash (\(trashService.trashCount) items)")
             }
+        }
+        .onPreferenceChange(TrashIconPositionKey.self) { position in
+            trashIconPosition = position
         }
         .statusBarHidden(false)
         .onAppear {
@@ -144,19 +180,35 @@ struct MediaViewerView: View {
     // MARK: - Paging Content
     
     private var pagingContent: some View {
-        TabView(selection: $currentIndex) {
-            ForEach(Array(assets.enumerated()), id: \.element.id) { index, asset in
-                pageView(for: index, asset: asset)
-                    .tag(index)
+        ZStack {
+            // Next photo preview (shown during trash animation - appears behind)
+            if isTrashAnimating, let nextIndex = nextVisibleIndex(from: currentIndex) {
+                MediaPageView(
+                    asset: assets[nextIndex],
+                    isCurrentPage: false,
+                    isTrashed: false
+                ) { }
             }
+
+            // Main TabView (on top)
+            TabView(selection: $currentIndex) {
+                ForEach(Array(assets.enumerated()), id: \.element.id) { index, asset in
+                    pageView(for: index, asset: asset)
+                        .tag(index)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
         }
-        .tabViewStyle(.page(indexDisplayMode: .never))
         .ignoresSafeArea()
+        .contentShape(Rectangle())
+        .onTapGesture { location in
+            handleEdgeTap(at: location)
+        }
     }
 
     private func pageView(for index: Int, asset: YearAsset) -> some View {
         let isTrashed = trashService.isTrashed(asset.id)
-        
+
         return MediaPageView(
             asset: asset,
             isCurrentPage: index == currentIndex,
@@ -164,7 +216,11 @@ struct MediaViewerView: View {
         ) {
             trashService.restore(asset.id)
         }
-        .swipeToTrash(isEnabled: !isTrashed) {
+        .swipeToTrash(
+            isEnabled: !isTrashed,
+            targetPosition: trashIconPosition,
+            onAnimationStart: { isTrashAnimating = true }
+        ) {
             trashItem(at: index)
         }
     }
@@ -463,35 +519,76 @@ struct MediaViewerView: View {
         toast = ToastData(message: "Moved to Trash (not deleted)") {
             trashService.restore(assetID)
         }
-        
-        // Auto-advance to next visible item
-        advanceToNextVisible(from: index)
+
+        // Auto-advance to next visible item (slight delay for animation sequencing)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            self.advanceToNextVisible(from: index)
+        }
     }
     
     private func advanceToNextVisible(from trashedIndex: Int) {
-        // Find next non-trashed item after the trashed one
-        for i in (trashedIndex + 1)..<assets.count {
-            if !trashService.isTrashed(assets[i].id) {
-                withAnimation(.easeInOut(duration: AnimationDuration.fast)) {
-                    currentIndex = i
-                }
-                return
-            }
+        guard let nextIndex = nextVisibleIndex(from: trashedIndex) else {
+            // All items trashed - visibleAssets will be empty and doneView will show
+            isTrashAnimating = false
+            return
         }
-        
-        // If no next, try previous
-        for i in stride(from: trashedIndex - 1, through: 0, by: -1) {
-            if !trashService.isTrashed(assets[i].id) {
-                withAnimation(.easeInOut(duration: AnimationDuration.fast)) {
-                    currentIndex = i
-                }
-                return
-            }
+
+        // Use transaction to disable TabView's slide animation
+        // (next photo is already visible behind via stack preview)
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            currentIndex = nextIndex
         }
-        
-        // All items trashed - visibleAssets will be empty and doneView will show
+
+        // Reset preview flag
+        isTrashAnimating = false
     }
-    
+
+    private func nextVisibleIndex(from index: Int) -> Int? {
+        // Try forward first
+        for i in (index + 1)..<assets.count {
+            if !trashService.isTrashed(assets[i].id) {
+                return i
+            }
+        }
+        // Then try backward
+        for i in stride(from: index - 1, through: 0, by: -1) {
+            if !trashService.isTrashed(assets[i].id) {
+                return i
+            }
+        }
+        return nil
+    }
+
+    // MARK: - Tap Navigation
+
+    private func goToPrevious() {
+        guard currentIndex > 0 else { return }
+        withAnimation(.easeInOut(duration: AnimationDuration.normal)) {
+            currentIndex -= 1
+        }
+    }
+
+    private func goToNext() {
+        guard currentIndex < assets.count - 1 else { return }
+        withAnimation(.easeInOut(duration: AnimationDuration.normal)) {
+            currentIndex += 1
+        }
+    }
+
+    private func handleEdgeTap(at location: CGPoint) {
+        let screenWidth = UIScreen.main.bounds.width
+        let edgeZone = screenWidth * 0.2  // 20% on each side
+
+        if location.x < edgeZone {
+            goToPrevious()
+        } else if location.x > screenWidth - edgeZone {
+            goToNext()
+        }
+        // Center taps are ignored
+    }
+
     // MARK: - Prefetching
     
     private func prefetchAdjacent() {

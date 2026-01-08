@@ -9,10 +9,15 @@ import SwiftUI
 
 struct SwipeToTrashModifier: ViewModifier {
     let isEnabled: Bool
+    let targetPosition: CGPoint
+    let onAnimationStart: () -> Void
     let onTrash: () -> Void
-    
+
     @State private var dragOffset: CGFloat = 0
     @State private var isDragging = false
+    @State private var opacity: Double = 1.0
+    @State private var animationOffset: CGPoint = .zero
+    @State private var scale: CGFloat = 1.0
     
     /// Threshold distance to commit trash action (balanced to avoid conflicts)
     private let trashThreshold: CGFloat = 90
@@ -26,18 +31,27 @@ struct SwipeToTrashModifier: ViewModifier {
     }
     
     func body(content: Content) -> some View {
-        ZStack {
-            content
-                .offset(y: dragOffset)
-                .scaleEffect(1 - (trashProgress * 0.05)) // Subtle shrink
-            
-            // Trash indicator overlay
-            if isDragging && abs(dragOffset) > 24 {
-                trashIndicator
-                    .opacity(Double(trashProgress))
+        GeometryReader { geometry in
+            let viewCenter = CGPoint(
+                x: geometry.size.width / 2,
+                y: geometry.size.height / 2
+            )
+
+            ZStack {
+                content
+                    .scaleEffect(scale * (1 - (trashProgress * 0.05))) // Shrink during drag + animation
+                    .offset(x: animationOffset.x, y: dragOffset + animationOffset.y)
+                    .opacity(opacity)
+
+                // Trash indicator overlay
+                if isDragging && abs(dragOffset) > 24 {
+                    trashIndicator
+                        .opacity(Double(trashProgress))
+                }
             }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .simultaneousGesture(isEnabled ? trashGesture(viewCenter: viewCenter) : nil)
         }
-        .simultaneousGesture(isEnabled ? trashGesture : nil)
     }
     
     // MARK: - Trash Indicator
@@ -64,8 +78,8 @@ struct SwipeToTrashModifier: ViewModifier {
     }
     
     // MARK: - Gesture
-    
-    private var trashGesture: some Gesture {
+
+    private func trashGesture(viewCenter: CGPoint) -> some Gesture {
         DragGesture(minimumDistance: 16)
             .onChanged { value in
                 // Only respond primarily to upward drags; allow small horizontal drift
@@ -77,9 +91,9 @@ struct SwipeToTrashModifier: ViewModifier {
                     isDragging = false
                     return
                 }
-                
+
                 isDragging = true
-                
+
                 // Apply resistance after threshold
                 let translation = -dy // positive magnitude for upward drag
                 if translation < trashThreshold {
@@ -89,28 +103,14 @@ struct SwipeToTrashModifier: ViewModifier {
                     let overflow = translation - trashThreshold
                     dragOffset = -(trashThreshold + (overflow * 0.3))
                 }
-                
+
                 dragOffset = max(dragOffset, -maxOffset)
             }
-            .onEnded { value in
+            .onEnded { _ in
                 let shouldTrash = abs(dragOffset) >= trashThreshold
-                
+
                 if shouldTrash {
-                    // Haptic feedback
-                    let impact = UIImpactFeedbackGenerator(style: .medium)
-                    impact.impactOccurred()
-                    
-                    // Animate out
-                    withAnimation(.easeOut(duration: AnimationDuration.fast)) {
-                        dragOffset = -(maxOffset + 100)
-                    }
-                    
-                    // Trigger trash after animation
-                    DispatchQueue.main.asyncAfter(deadline: .now() + AnimationDuration.fast) {
-                        onTrash()
-                        dragOffset = 0
-                        isDragging = false
-                    }
+                    animateToTrash(from: viewCenter)
                 } else {
                     // Snap back
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
@@ -120,13 +120,58 @@ struct SwipeToTrashModifier: ViewModifier {
                 }
             }
     }
+
+    // MARK: - Fly to Trash Animation
+
+    private func animateToTrash(from viewCenter: CGPoint) {
+        // Signal animation start (shows next photo behind)
+        onAnimationStart()
+
+        // Haptic feedback
+        let impact = UIImpactFeedbackGenerator(style: .medium)
+        impact.impactOccurred()
+
+        // Calculate offset to trash icon (top-right corner)
+        let targetOffset = CGPoint(
+            x: targetPosition.x - viewCenter.x,
+            y: targetPosition.y - viewCenter.y - dragOffset // Account for current drag offset
+        )
+
+        // Animate photo shrinking and flying to trash icon
+        withAnimation(.easeOut(duration: 0.35)) {
+            animationOffset = targetOffset
+            scale = 0.1
+            opacity = 0
+            dragOffset = 0 // Clear drag offset as we animate to position
+        }
+
+        // Trigger trash after animation completes
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.38) {
+            onTrash()
+            // Reset all state
+            animationOffset = .zero
+            scale = 1.0
+            opacity = 1.0
+            isDragging = false
+        }
+    }
 }
 
 // MARK: - View Extension
 
 extension View {
-    func swipeToTrash(isEnabled: Bool = true, onTrash: @escaping () -> Void) -> some View {
-        modifier(SwipeToTrashModifier(isEnabled: isEnabled, onTrash: onTrash))
+    func swipeToTrash(
+        isEnabled: Bool = true,
+        targetPosition: CGPoint = .zero,
+        onAnimationStart: @escaping () -> Void = {},
+        onTrash: @escaping () -> Void
+    ) -> some View {
+        modifier(SwipeToTrashModifier(
+            isEnabled: isEnabled,
+            targetPosition: targetPosition,
+            onAnimationStart: onAnimationStart,
+            onTrash: onTrash
+        ))
     }
 }
 
