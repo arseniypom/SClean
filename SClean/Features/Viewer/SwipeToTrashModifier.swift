@@ -18,6 +18,7 @@ struct SwipeToTrashModifier: ViewModifier {
     @State private var opacity: Double = 1.0
     @State private var animationOffset: CGPoint = .zero
     @State private var scale: CGFloat = 1.0
+    @State private var rotation: Double = 0
     
     /// Threshold distance to commit trash action (balanced to avoid conflicts)
     private let trashThreshold: CGFloat = 90
@@ -32,14 +33,17 @@ struct SwipeToTrashModifier: ViewModifier {
     
     func body(content: Content) -> some View {
         GeometryReader { geometry in
+            // Use global coordinates to match targetPosition (trash icon position)
+            let globalFrame = geometry.frame(in: .global)
             let viewCenter = CGPoint(
-                x: geometry.size.width / 2,
-                y: geometry.size.height / 2
+                x: globalFrame.midX,
+                y: globalFrame.midY
             )
 
             ZStack {
                 content
                     .scaleEffect(scale * (1 - (trashProgress * 0.05))) // Shrink during drag + animation
+                    .rotationEffect(.degrees(rotation), anchor: .center)
                     .offset(x: animationOffset.x, y: dragOffset + animationOffset.y)
                     .opacity(opacity)
 
@@ -105,6 +109,9 @@ struct SwipeToTrashModifier: ViewModifier {
                 }
 
                 dragOffset = max(dragOffset, -maxOffset)
+
+                // Subtle tilt toward trash during drag (-5° max)
+                rotation = -trashProgress * 5
             }
             .onEnded { _ in
                 let shouldTrash = abs(dragOffset) >= trashThreshold
@@ -115,6 +122,7 @@ struct SwipeToTrashModifier: ViewModifier {
                     // Snap back
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                         dragOffset = 0
+                        rotation = 0
                         isDragging = false
                     }
                 }
@@ -137,10 +145,11 @@ struct SwipeToTrashModifier: ViewModifier {
             y: targetPosition.y - viewCenter.y - dragOffset // Account for current drag offset
         )
 
-        // Animate photo shrinking and flying to trash icon
+        // Animate photo shrinking, rotating, and flying to trash icon
         withAnimation(.easeOut(duration: 0.35)) {
             animationOffset = targetOffset
-            scale = 0.1
+            scale = 0.08
+            rotation = -15 // Tilt toward trash (clockwise for top-right target)
             opacity = 0
             dragOffset = 0 // Clear drag offset as we animate to position
         }
@@ -148,11 +157,16 @@ struct SwipeToTrashModifier: ViewModifier {
         // Trigger trash after animation completes
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.38) {
             onTrash()
-            // Reset all state
-            animationOffset = .zero
-            scale = 1.0
-            opacity = 1.0
             isDragging = false
+
+            // Delay state reset until after parent changes currentIndex
+            // This prevents the old photo from flashing back before the switch
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                animationOffset = .zero
+                scale = 1.0
+                rotation = 0
+                opacity = 1.0
+            }
         }
     }
 }

@@ -32,8 +32,10 @@ struct MediaPageView: View {
     
     var body: some View {
         ZStack {
-            Color.black
-            
+            // Transparent background - black is provided by parent (MediaViewerView)
+            // This allows swipe-to-trash animation to show only the photo, not letterboxing
+            Color.clear
+
             switch asset.mediaType {
             case .video:
                 if isCurrentPage {
@@ -175,13 +177,21 @@ struct MediaPageView: View {
     
     private func loadImage() {
         guard image == nil else { return }
-        
+
+        // Synchronous cache check - instant display for prefetched images
+        if let cached = FullImageLoader.shared.getCachedImage(for: asset.id) {
+            image = cached
+            isLoading = false
+            return
+        }
+
+        // Async fallback for cache misses
         isLoading = true
         hasError = false
-        
+
         loadTask = Task {
             let loaded = await FullImageLoader.shared.loadFullImage(for: asset.id)
-            
+
             if !Task.isCancelled {
                 if let loaded {
                     withAnimation(.easeIn(duration: AnimationDuration.fast)) {

@@ -70,20 +70,29 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
 
 actor LibraryIndexStore {
     static let shared = LibraryIndexStore()
-    
+
     private nonisolated(unsafe) let fileManager: FileManager
     private let storeURL: URL
-    
-    init(fileManager: FileManager = .default) {
+
+    init(fileManager: FileManager = .default, storeURL: URL? = nil) {
         self.fileManager = fileManager
-        
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        let directory = appSupport.appendingPathComponent("SClean", isDirectory: true)
-        self.storeURL = directory.appendingPathComponent("library-index.json")
-        
-        if !fileManager.fileExists(atPath: directory.path) {
-            try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        if let customURL = storeURL {
+            self.storeURL = customURL
+            // Ensure directory exists for custom URL
+            let directory = customURL.deletingLastPathComponent()
+            if !fileManager.fileExists(atPath: directory.path) {
+                try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            }
+        } else {
+            let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+                ?? URL(fileURLWithPath: NSTemporaryDirectory())
+            let directory = appSupport.appendingPathComponent("SClean", isDirectory: true)
+            self.storeURL = directory.appendingPathComponent("library-index.json")
+
+            if !fileManager.fileExists(atPath: directory.path) {
+                try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            }
         }
     }
     

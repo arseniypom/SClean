@@ -28,35 +28,48 @@ struct TrashedItem: Codable, Equatable, Identifiable {
 /// Manages the in-app Trash - items marked for deletion but not yet permanently removed
 @MainActor
 final class TrashService: ObservableObject {
-    
+
     /// Shared instance
     static let shared = TrashService()
-    
+
     /// All trashed items (ordered by trashedAt, oldest first)
     @Published private(set) var trashedItems: [TrashedItem] = []
-    
+
     /// Last trashed item (for undo)
     @Published private(set) var lastTrashedID: String?
-    
+
     /// Total count of trashed items
     var trashCount: Int { trashedItems.count }
-    
+
     /// Set of trashed IDs for fast lookup
     var trashedIDs: Set<String> {
         Set(trashedItems.map(\.assetID))
     }
-    
+
     /// Ordered list of trashed asset IDs (oldest first)
     var orderedTrashedIDs: [String] {
         trashedItems.map(\.assetID)
     }
-    
+
     private let userDefaultsKey = "SlideClean.trashedItems"
-    
+
     // Legacy key for migration
     private let legacyUserDefaultsKey = "SClean.trashedAssetIDs"
-    
+
+    // Dependencies for testability
+    private let storage: KeyValueStoring
+    private let dateProvider: DateProviding
+
     private init() {
+        self.storage = UserDefaults.standard
+        self.dateProvider = SystemDateProvider()
+        loadFromStorage()
+    }
+
+    /// Internal initializer for testing
+    init(storage: KeyValueStoring, dateProvider: DateProviding) {
+        self.storage = storage
+        self.dateProvider = dateProvider
         loadFromStorage()
     }
     
@@ -66,8 +79,8 @@ final class TrashService: ObservableObject {
     func trash(_ assetID: String) {
         // Don't add duplicates
         guard !isTrashed(assetID) else { return }
-        
-        let item = TrashedItem(assetID: assetID)
+
+        let item = TrashedItem(assetID: assetID, trashedAt: dateProvider.now)
         // Append at end (oldest first ordering overall)
         trashedItems.append(item)
         lastTrashedID = assetID
@@ -137,33 +150,33 @@ final class TrashService: ObservableObject {
     }
     
     // MARK: - Persistence
-    
+
     private func loadFromStorage() {
         // Try loading new format first
-        if let data = UserDefaults.standard.data(forKey: userDefaultsKey),
+        if let data = storage.data(forKey: userDefaultsKey),
            let items = try? JSONDecoder().decode([TrashedItem].self, from: data) {
             // Ensure oldest-first ordering by trashedAt
             trashedItems = items.sorted { $0.trashedAt < $1.trashedAt }
             return
         }
-        
+
         // Migrate from legacy format (Set<String>)
-        if let data = UserDefaults.standard.data(forKey: legacyUserDefaultsKey),
+        if let data = storage.data(forKey: legacyUserDefaultsKey),
            let ids = try? JSONDecoder().decode(Set<String>.self, from: data) {
             // Convert to new format with current timestamp
-            let now = Date()
+            let now = dateProvider.now
             trashedItems = ids.map { TrashedItem(assetID: $0, trashedAt: now) }
                 .sorted { $0.trashedAt < $1.trashedAt }
             // Save in new format
             saveToStorage()
             // Remove legacy data
-            UserDefaults.standard.removeObject(forKey: legacyUserDefaultsKey)
+            storage.removeObject(forKey: legacyUserDefaultsKey)
         }
     }
-    
+
     private func saveToStorage() {
         if let data = try? JSONEncoder().encode(trashedItems) {
-            UserDefaults.standard.set(data, forKey: userDefaultsKey)
+            storage.set(data, forKey: userDefaultsKey)
         }
     }
 }

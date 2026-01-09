@@ -30,7 +30,13 @@ final class FullImageLoader {
     }
     
     // MARK: - Public Methods
-    
+
+    /// Synchronous cache check - returns immediately if cached, nil otherwise
+    /// Use this for instant display of prefetched images without async delay
+    func getCachedImage(for assetID: String) -> UIImage? {
+        return cache[assetID]
+    }
+
     func loadFullImage(for assetID: String) async -> UIImage? {
         // Check cache first
         if let cached = cache[assetID] {

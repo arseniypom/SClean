@@ -33,6 +33,7 @@ struct MediaViewerView: View {
     @State private var showTrashTip: Bool = false
     @State private var currentAssetSize: Int64?
     @State private var isTrashAnimating = false
+    @State private var previewAssetID: String?
     @State private var trashIconPosition: CGPoint = .zero
     @Environment(\.dismiss) private var dismiss
     
@@ -181,13 +182,21 @@ struct MediaViewerView: View {
     
     private var pagingContent: some View {
         ZStack {
-            // Next photo preview (shown during trash animation - appears behind)
-            if isTrashAnimating, let nextIndex = nextVisibleIndex(from: currentIndex) {
+            // Static black background - doesn't animate with swipe-to-trash
+            Color.black
+
+            // Next photo preview - uses CAPTURED asset ID (stable during animation)
+            // Starts smaller and grows as current photo flies away (synchronized card stack effect)
+            if let previewID = previewAssetID,
+               let previewAsset = assets.first(where: { $0.id == previewID }) {
                 MediaPageView(
-                    asset: assets[nextIndex],
+                    asset: previewAsset,
                     isCurrentPage: false,
                     isTrashed: false
                 ) { }
+                .scaleEffect(isTrashAnimating ? 1.0 : 0.92)
+                .opacity(isTrashAnimating ? 1.0 : 0)
+                .animation(.easeOut(duration: 0.35), value: isTrashAnimating)
             }
 
             // Main TabView (on top)
@@ -219,7 +228,13 @@ struct MediaViewerView: View {
         .swipeToTrash(
             isEnabled: !isTrashed,
             targetPosition: trashIconPosition,
-            onAnimationStart: { isTrashAnimating = true }
+            onAnimationStart: {
+                // Capture the next photo ID BEFORE animation starts
+                if let nextIndex = nextVisibleIndex(from: index) {
+                    previewAssetID = assets[nextIndex].id
+                }
+                isTrashAnimating = true
+            }
         ) {
             trashItem(at: index)
         }
@@ -520,29 +535,38 @@ struct MediaViewerView: View {
             trashService.restore(assetID)
         }
 
-        // Auto-advance to next visible item (slight delay for animation sequencing)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            self.advanceToNextVisible(from: index)
-        }
+        // Advance immediately - no delay needed
+        // SwipeToTrashModifier delays its state reset to avoid flash-back
+        advanceToNextVisible(from: index)
     }
     
     private func advanceToNextVisible(from trashedIndex: Int) {
         guard let nextIndex = nextVisibleIndex(from: trashedIndex) else {
             // All items trashed - visibleAssets will be empty and doneView will show
-            isTrashAnimating = false
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                isTrashAnimating = false
+                previewAssetID = nil
+            }
             return
         }
 
-        // Use transaction to disable TabView's slide animation
-        // (next photo is already visible behind via stack preview)
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            currentIndex = nextIndex
+        // Reset animation state FIRST (instant hide preview)
+        // This prevents the preview from showing wrong photo when currentIndex changes
+        var resetTransaction = Transaction()
+        resetTransaction.disablesAnimations = true
+        withTransaction(resetTransaction) {
+            isTrashAnimating = false
+            previewAssetID = nil
         }
 
-        // Reset preview flag
-        isTrashAnimating = false
+        // Then change index (no delay needed)
+        var indexTransaction = Transaction()
+        indexTransaction.disablesAnimations = true
+        withTransaction(indexTransaction) {
+            currentIndex = nextIndex
+        }
     }
 
     private func nextVisibleIndex(from index: Int) -> Int? {

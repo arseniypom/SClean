@@ -28,16 +28,26 @@ struct DeletionStats: Codable, Equatable {
 /// Tracks lifetime stats for media deletion
 @MainActor
 final class StatsService: ObservableObject {
-    
+
     /// Shared instance
     static let shared = StatsService()
-    
+
     /// Current stats
     @Published private(set) var stats: DeletionStats = .zero
-    
+
     private let userDefaultsKey = "SlideClean.deletionStats"
-    
+
+    // Dependencies for testability
+    private let storage: KeyValueStoring
+
     private init() {
+        self.storage = UserDefaults.standard
+        loadFromStorage()
+    }
+
+    /// Internal initializer for testing
+    init(storage: KeyValueStoring) {
+        self.storage = storage
         loadFromStorage()
     }
     
@@ -90,17 +100,17 @@ final class StatsService: ObservableObject {
     }
     
     // MARK: - Persistence
-    
+
     private func loadFromStorage() {
-        if let data = UserDefaults.standard.data(forKey: userDefaultsKey),
+        if let data = storage.data(forKey: userDefaultsKey),
            let decoded = try? JSONDecoder().decode(DeletionStats.self, from: data) {
             stats = decoded
         }
     }
-    
+
     private func saveToStorage() {
         if let data = try? JSONEncoder().encode(stats) {
-            UserDefaults.standard.set(data, forKey: userDefaultsKey)
+            storage.set(data, forKey: userDefaultsKey)
         }
     }
 }

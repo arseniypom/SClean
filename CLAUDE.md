@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 SClean is a Swift/SwiftUI iOS app for efficiently browsing and cleaning up photos/videos from the photo library. Users can organize media by year, mark items for trash with undo capability, and permanently delete media while tracking deletion statistics.
 
 - **Bundle ID:** com.seihabits.SClean
-- **Platform:** iOS (SwiftUI)
+- **Platform:** iOS 18+ (SwiftUI)
 - **Build System:** Xcode (no external dependencies)
 
 ## Build Commands
@@ -19,6 +19,9 @@ xcodebuild -scheme SClean -configuration Debug build
 # Run tests
 xcodebuild test -scheme SClean -configuration Debug
 
+# Run a single test
+xcodebuild test -scheme SClean -only-testing:SCleanTests/TestClassName/testMethodName
+
 # In Xcode: Cmd+B (build), Cmd+U (test), Cmd+R (run)
 ```
 
@@ -26,19 +29,19 @@ xcodebuild test -scheme SClean -configuration Debug
 
 ### Service-Oriented + MVVM-Lite Pattern
 
-**Services (Core/):** Business logic with `@MainActor`, `ObservableObject`, singleton pattern
+**Services (Core/Services/):** Business logic with `@MainActor`, `ObservableObject`, singleton pattern via `static let shared`
 **Views (Features/):** SwiftUI views injecting services via `@StateObject`/`@ObservedObject`
 
 ### Key Services
 
 | Service | Purpose |
 |---------|---------|
-| PhotoLibraryService | Indexes photos, groups by year, handles caching |
+| PhotoLibraryService | Indexes photos, groups by year, uses LibraryIndexer for background work |
 | PhotoPermissionService | Manages photo library permissions |
 | YearPhotosService | Loads assets for a specific year |
 | ThumbnailLoader | Efficient thumbnail loading with PHCachingImageManager |
 | FullImageLoader | Full-resolution image loading |
-| TrashService | In-app soft delete with undo |
+| TrashService | In-app soft delete with undo (persisted to UserDefaults) |
 | DeletionService | Permanent deletion via PHPhotoLibrary |
 | StatsService | Tracks lifetime deletion counts/bytes |
 
@@ -50,6 +53,13 @@ enum LibraryState: Equatable, Sendable {
     case idle, loading, loaded([YearBucket]), empty, error(String)
 }
 ```
+
+### Concurrency Pattern
+
+- Services are `@MainActor` for UI thread safety
+- Data models crossing actor boundaries use `nonisolated` and `Sendable`
+- Background work (e.g., `LibraryIndexer`) uses `nonisolated` with async callbacks
+- `PHPhotoLibraryChangeObserver` callbacks require `nonisolated` wrapper classes
 
 ### Navigation Flow
 
@@ -70,21 +80,33 @@ RootView (permission gate)
 - **Paper** (#F7F7FA) - Off-white
 - **Blade** (#6D7CFF) - Accent for interactive states
 
-Use semantic colors (`Color.scBackground`, `Color.scSurface`, `Color.scTextPrimary`, etc.) from Theme.swift - never hardcode colors.
+Use semantic colors from Theme.swift - never hardcode colors:
+- `Color.scBackground`, `Color.scSurface`, `Color.scSurfaceElevated`
+- `Color.scTextPrimary`, `Color.scTextSecondary`, `Color.scTextDisabled`
+- `Color.scBorder`, `Color.scTint`, `Color.scDestructive`
 
-### Surface Styling
+### Surface Styling (Liquid Glass aware)
 
-- Content cards: `scCardStyle()`
-- Controls/buttons: `scControlSurface()`
-- iOS 26+ uses liquid glass for controls, solid surfaces for content
+Per iOS 26+ Liquid Glass rules: glass is for **controls**, solid surfaces for **content**.
+
+- Content cards: `scCardStyle()` - solid background, no glass
+- Control surfaces: `scControlSurface()` - glass on iOS 26+, material on older
+- Floating buttons: `scFloatingButtonStyle()` - glass on iOS 26+
+
+### Spacing & Layout
+
+Use `Spacing` enum: `.xxs(4)`, `.xs(8)`, `.sm(12)`, `.md(16)`, `.lg(24)`, `.xl(32)`, `.xxl(40)`
+Use `CornerRadius` enum: `.sm(10)`, `.md(14)`, `.lg(16)`
+Use `Typography` for fonts: `.largeTitle`, `.title1`, `.headline`, `.body`, etc.
 
 ## Code Conventions
 
-- Service classes marked `@MainActor` for thread safety
+- Service classes marked `@MainActor` with `static let shared` singleton
 - State enums are `Equatable, Sendable`
 - All Views have `#Preview` blocks
 - Background thread callbacks use `nonisolated`
 - Async/await for all async work in services
+- Use `@Published private(set)` for observable state
 
 ## Directory Structure
 
