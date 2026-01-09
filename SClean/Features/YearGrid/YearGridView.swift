@@ -172,6 +172,7 @@ struct YearGridView: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .accessibilityIdentifier("gridPhoto_\(index)")
                         }
                     }
                     .padding(.horizontal, 2)

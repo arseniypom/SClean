@@ -146,6 +146,7 @@ struct HomeView: View {
                         YearCardContent(year: bucket.year, count: bucket.count, totalBytes: bucket.totalBytes)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("yearCard_\(bucket.year)")
                     .padding(.horizontal, Spacing.md)
                 }
                 

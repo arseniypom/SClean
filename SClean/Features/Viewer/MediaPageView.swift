@@ -13,6 +13,11 @@ struct MediaPageView: View {
     let isTrashed: Bool
     let onUndoTrash: (() -> Void)?
     
+    @State private var image: UIImage?
+    @State private var isLoading: Bool
+    @State private var hasError = false
+    @State private var loadTask: Task<Void, Never>?
+
     init(
         asset: YearAsset,
         isCurrentPage: Bool,
@@ -23,12 +28,19 @@ struct MediaPageView: View {
         self.isCurrentPage = isCurrentPage
         self.isTrashed = isTrashed
         self.onUndoTrash = onUndoTrash
+
+        // Pre-populate from cache to avoid loading state flash (blink/shift bug fix)
+        // When TabView switches pages, each page is a fresh view with new @State.
+        // Without this, the view briefly shows ProgressView before the cached image loads.
+        if asset.mediaType != .video,
+           let cached = FullImageLoader.shared.getCachedImage(for: asset.id) {
+            _image = State(initialValue: cached)
+            _isLoading = State(initialValue: false)
+        } else {
+            _image = State(initialValue: nil)
+            _isLoading = State(initialValue: asset.mediaType != .video)
+        }
     }
-    
-    @State private var image: UIImage?
-    @State private var isLoading = true
-    @State private var hasError = false
-    @State private var loadTask: Task<Void, Never>?
     
     var body: some View {
         ZStack {
@@ -76,6 +88,7 @@ struct MediaPageView: View {
             Image(uiImage: image)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
+                .accessibilityIdentifier("photoImage")
                 .transition(.opacity.animation(.easeIn(duration: AnimationDuration.fast)))
         } else if isLoading {
             VStack(spacing: Spacing.md) {

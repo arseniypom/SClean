@@ -186,17 +186,22 @@ struct MediaViewerView: View {
             Color.black
 
             // Next photo preview - uses CAPTURED asset ID (stable during animation)
-            // Starts smaller and grows as current photo flies away (synchronized card stack effect)
+            // Shows behind the current page during fly-to-trash animation
+            // Wrapped in TabView to guarantee identical layout context as main TabView pages
             if let previewID = previewAssetID,
                let previewAsset = assets.first(where: { $0.id == previewID }) {
-                MediaPageView(
-                    asset: previewAsset,
-                    isCurrentPage: false,
-                    isTrashed: false
-                ) { }
-                .scaleEffect(isTrashAnimating ? 1.0 : 0.92)
+                TabView {
+                    MediaPageView(
+                        asset: previewAsset,
+                        isCurrentPage: false,
+                        isTrashed: false
+                    ) { }
+                    .tag(0)
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
                 .opacity(isTrashAnimating ? 1.0 : 0)
-                .animation(.easeOut(duration: 0.35), value: isTrashAnimating)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("previewPhotoView")
             }
 
             // Main TabView (on top)
@@ -233,11 +238,15 @@ struct MediaViewerView: View {
                 if let nextIndex = nextVisibleIndex(from: index) {
                     previewAssetID = assets[nextIndex].id
                 }
-                isTrashAnimating = true
+                // Animate preview IN (scale 0.92→1.0, opacity 0→1)
+                withAnimation(.easeOut(duration: 0.35)) {
+                    isTrashAnimating = true
+                }
             }
         ) {
             trashItem(at: index)
         }
+        .accessibilityIdentifier(index == currentIndex ? "currentPhotoView" : "photoView_\(index)")
     }
     
     // MARK: - Counter View
