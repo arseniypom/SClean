@@ -12,6 +12,7 @@ import SwiftUI
 private enum HomeTab: String, CaseIterable {
     case years
     case months
+    case types
 }
 
 struct HomeView: View {
@@ -24,6 +25,7 @@ struct HomeView: View {
     @State private var hasAppeared = false
     @State private var cachedYears: [YearBucket] = []
     @State private var cachedMonths: [MonthBucket] = []
+    @State private var cachedTypes: [TypeBucket] = []
     
     var body: some View {
         NavigationStack {
@@ -63,10 +65,12 @@ struct HomeView: View {
                 if case .loaded(let years) = newValue {
                     cachedYears = years
                     cachedMonths = libraryService.monthBuckets
+                    cachedTypes = libraryService.typeBuckets
                 }
                 if case .empty = newValue {
                     cachedYears = []
                     cachedMonths = []
+                    cachedTypes = []
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
@@ -117,6 +121,7 @@ struct HomeView: View {
     
     private func yearsList(_ years: [YearBucket]) -> some View {
         let months = cachedMonths.isEmpty ? libraryService.monthBuckets : cachedMonths
+        let types = cachedTypes.isEmpty ? libraryService.typeBuckets : cachedTypes
 
         return ScrollView {
             LazyVStack(spacing: Spacing.sm) {
@@ -153,6 +158,13 @@ struct HomeView: View {
                         selectedTab = .months
                     }
 
+                    TabHeaderButton(
+                        title: "Types",
+                        isSelected: selectedTab == .types
+                    ) {
+                        selectedTab = .types
+                    }
+
                     Spacer()
                 }
                 .padding(.horizontal, Spacing.md)
@@ -175,7 +187,7 @@ struct HomeView: View {
                         .accessibilityIdentifier("yearCard_\(bucket.year)")
                         .padding(.horizontal, Spacing.md)
                     }
-                } else {
+                } else if selectedTab == .months {
                     // Month cards
                     ForEach(months) { bucket in
                         NavigationLink {
@@ -188,6 +200,22 @@ struct HomeView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("monthCard_\(bucket.id)")
+                        .padding(.horizontal, Spacing.md)
+                    }
+                } else {
+                    // Type cards
+                    ForEach(types) { bucket in
+                        NavigationLink {
+                            TypeGridView(
+                                bucket: bucket,
+                                snapshot: libraryService.currentSnapshot,
+                                permissionService: permissionService
+                            )
+                        } label: {
+                            TypeCardContent(bucket: bucket)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("typeCard_\(bucket.id)")
                         .padding(.horizontal, Spacing.md)
                     }
                 }

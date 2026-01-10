@@ -15,6 +15,23 @@ nonisolated struct IndexedAsset: Codable, Equatable, Identifiable, Sendable {
     let year: Int
     let byteSize: Int64
     let lastKnownChangeDate: Date
+
+    // v2 fields for media type detection
+    let mediaType: Int         // PHAssetMediaType.rawValue (1=image, 2=video)
+    let mediaSubtypes: Int     // PHAssetMediaSubtype bitmask
+    let duration: TimeInterval // For videos, 0 for photos
+
+    /// Backward-compatible initializer for v1 data (defaults for new fields)
+    init(id: String, year: Int, byteSize: Int64, lastKnownChangeDate: Date,
+         mediaType: Int = 0, mediaSubtypes: Int = 0, duration: TimeInterval = 0) {
+        self.id = id
+        self.year = year
+        self.byteSize = byteSize
+        self.lastKnownChangeDate = lastKnownChangeDate
+        self.mediaType = mediaType
+        self.mediaSubtypes = mediaSubtypes
+        self.duration = duration
+    }
 }
 
 // MARK: - Month Bucket
@@ -41,10 +58,46 @@ nonisolated struct MonthBucket: Identifiable, Equatable, Sendable {
     }
 }
 
+// MARK: - Type Category
+
+/// Media type categories for the Types tab
+enum TypeCategory: String, CaseIterable, Identifiable, Sendable {
+    case largestVideos = "Largest Videos"
+    case largestPhotos = "Largest Photos"
+    case screenshots = "Screenshots"
+    case videos = "Videos"
+    case photos = "Photos"
+    case livePhotos = "Live Photos"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .largestVideos: return "video.fill"
+        case .largestPhotos: return "photo.fill"
+        case .screenshots: return "rectangle.dashed"
+        case .videos: return "video"
+        case .photos: return "photo"
+        case .livePhotos: return "livephoto"
+        }
+    }
+}
+
+// MARK: - Type Bucket
+
+/// Aggregated type group for UI
+nonisolated struct TypeBucket: Identifiable, Equatable, Sendable {
+    let category: TypeCategory
+    let count: Int
+    let totalBytes: Int64
+
+    var id: String { category.id }
+}
+
 // MARK: - Library Index Snapshot
 
 nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
-    static let currentVersion = 1
+    static let currentVersion = 2  // Bumped from 1 to add mediaType/mediaSubtypes/duration
 
     let version: Int
     let lastIndexedAt: Date
@@ -106,6 +159,99 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
             .map { MonthBucket(id: $0.key, year: $0.value.year, month: $0.value.month,
                                count: $0.value.count, totalBytes: $0.value.bytes) }
             .sorted { ($0.year, $0.month) > ($1.year, $1.month) }  // Newest first
+    }
+
+    /// Aggregated type buckets for UI
+    var typeBuckets: [TypeBucket] {
+        guard !assets.isEmpty else { return [] }
+
+        // PHAssetMediaType raw values: 1=image, 2=video
+        // PHAssetMediaSubtype: photoLive=0x8 (bit 3), photoScreenshot=0x4 (bit 2)
+        let photoLiveMask = 0x8
+        let screenshotMask = 0x4
+
+        var videoCount = 0, videoBytes: Int64 = 0
+        var photoCount = 0, photoBytes: Int64 = 0
+        var livePhotoCount = 0, livePhotoBytes: Int64 = 0
+        var screenshotCount = 0, screenshotBytes: Int64 = 0
+
+        for asset in assets {
+            if asset.mediaType == 2 { // Video
+                videoCount += 1
+                videoBytes += asset.byteSize
+            } else if asset.mediaType == 1 { // Image
+                let isLivePhoto = (asset.mediaSubtypes & photoLiveMask) != 0
+                let isScreenshot = (asset.mediaSubtypes & screenshotMask) != 0
+
+                if isLivePhoto {
+                    livePhotoCount += 1
+                    livePhotoBytes += asset.byteSize
+                } else if isScreenshot {
+                    screenshotCount += 1
+                    screenshotBytes += asset.byteSize
+                } else {
+                    photoCount += 1
+                    photoBytes += asset.byteSize
+                }
+            }
+        }
+
+        return [
+            TypeBucket(category: .largestVideos, count: min(videoCount, 50), totalBytes: videoBytes),
+            TypeBucket(category: .largestPhotos, count: min(photoCount, 50), totalBytes: photoBytes),
+            TypeBucket(category: .screenshots, count: screenshotCount, totalBytes: screenshotBytes),
+            TypeBucket(category: .videos, count: videoCount, totalBytes: videoBytes),
+            TypeBucket(category: .photos, count: photoCount, totalBytes: photoBytes),
+            TypeBucket(category: .livePhotos, count: livePhotoCount, totalBytes: livePhotoBytes)
+        ]
+    }
+
+    /// Get assets filtered by type category
+    func assets(for category: TypeCategory) -> [IndexedAsset] {
+        let photoLiveMask = 0x8
+        let screenshotMask = 0x4
+
+        switch category {
+        case .videos:
+            return assets.filter { $0.mediaType == 2 }
+                .sorted { $0.lastKnownChangeDate > $1.lastKnownChangeDate }
+
+        case .largestVideos:
+            return assets.filter { $0.mediaType == 2 }
+                .sorted { $0.byteSize > $1.byteSize }
+                .prefix(50)
+                .map { $0 }
+
+        case .photos:
+            return assets.filter {
+                $0.mediaType == 1 &&
+                ($0.mediaSubtypes & photoLiveMask) == 0 &&
+                ($0.mediaSubtypes & screenshotMask) == 0
+            }
+            .sorted { $0.lastKnownChangeDate > $1.lastKnownChangeDate }
+
+        case .largestPhotos:
+            return assets.filter {
+                $0.mediaType == 1 &&
+                ($0.mediaSubtypes & photoLiveMask) == 0 &&
+                ($0.mediaSubtypes & screenshotMask) == 0
+            }
+            .sorted { $0.byteSize > $1.byteSize }
+            .prefix(50)
+            .map { $0 }
+
+        case .livePhotos:
+            return assets.filter {
+                $0.mediaType == 1 && ($0.mediaSubtypes & photoLiveMask) != 0
+            }
+            .sorted { $0.lastKnownChangeDate > $1.lastKnownChangeDate }
+
+        case .screenshots:
+            return assets.filter {
+                $0.mediaType == 1 && ($0.mediaSubtypes & screenshotMask) != 0
+            }
+            .sorted { $0.lastKnownChangeDate > $1.lastKnownChangeDate }
+        }
     }
 }
 

@@ -66,29 +66,43 @@ struct LibraryIndexer: Sendable {
             let changeDate = asset.modificationDate ?? creationDate
             let identifier = asset.localIdentifier
             
-            // Reuse cached metadata when the asset hasn't changed since last index.
-            if let cached = cachedAssets[identifier], changeDate <= lastIndexedAt {
+            // Reuse cached metadata when the asset hasn't changed since last index
+            // AND cached asset has v2 fields (mediaType != 0).
+            if let cached = cachedAssets[identifier],
+               changeDate <= lastIndexedAt,
+               cached.mediaType != 0 {  // v2 cache check
                 if cached.year == year {
                     indexedAssets.append(cached)
                 } else {
-                    // Creation date changed; reuse size but update year.
+                    // Creation date changed; reuse other fields but update year.
                     let updated = IndexedAsset(
                         id: cached.id,
                         year: year,
                         byteSize: cached.byteSize,
-                        lastKnownChangeDate: cached.lastKnownChangeDate
+                        lastKnownChangeDate: cached.lastKnownChangeDate,
+                        mediaType: cached.mediaType,
+                        mediaSubtypes: cached.mediaSubtypes,
+                        duration: cached.duration
                     )
                     indexedAssets.append(updated)
                 }
                 return
             }
-            
+
+            // Read media type info (fast property reads)
+            let mediaType = asset.mediaType.rawValue
+            let mediaSubtypes = Int(asset.mediaSubtypes.rawValue)
+            let duration = asset.duration
+
             let byteSize = Self.estimatedByteSize(for: asset)
             let indexed = IndexedAsset(
                 id: identifier,
                 year: year,
                 byteSize: byteSize,
-                lastKnownChangeDate: changeDate
+                lastKnownChangeDate: changeDate,
+                mediaType: mediaType,
+                mediaSubtypes: mediaSubtypes,
+                duration: duration
             )
             indexedAssets.append(indexed)
         }
