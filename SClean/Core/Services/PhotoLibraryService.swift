@@ -51,10 +51,13 @@ nonisolated enum LibraryState: Equatable, Sendable {
 
 @MainActor
 final class PhotoLibraryService: ObservableObject {
-    
+
     @Published private(set) var state: LibraryState = .idle
     @Published private(set) var indexingProgress: Double? = nil
-    
+
+    /// Current month buckets derived from the latest snapshot
+    private(set) var monthBuckets: [MonthBucket] = []
+
     private let indexStore: LibraryIndexStore
     private let indexer: LibraryIndexer
     private var changeObserverWrapper: ChangeObserverWrapper?
@@ -77,6 +80,7 @@ final class PhotoLibraryService: ObservableObject {
         let cachedSnapshot = indexStore.loadSnapshot()
         if let cachedSnapshot, !cachedSnapshot.yearBuckets.isEmpty {
             state = .loaded(cachedSnapshot.yearBuckets)
+            monthBuckets = cachedSnapshot.monthBuckets
         } else {
             state = .loading
         }
@@ -102,12 +106,14 @@ final class PhotoLibraryService: ObservableObject {
         
         let snapshot = await computeTask.value
         indexStore.saveSnapshot(snapshot)
-        
+
         indexingProgress = nil
-        
+        monthBuckets = snapshot.monthBuckets
+
         let buckets = snapshot.yearBuckets
         if buckets.isEmpty {
             state = .empty
+            monthBuckets = []
         } else {
             state = .loaded(buckets)
         }

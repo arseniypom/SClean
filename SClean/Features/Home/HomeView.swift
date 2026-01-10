@@ -7,14 +7,23 @@
 
 import SwiftUI
 
+// MARK: - Home Tab
+
+private enum HomeTab: String, CaseIterable {
+    case years
+    case months
+}
+
 struct HomeView: View {
     @ObservedObject var permissionService: PhotoPermissionService
     @StateObject private var libraryService = PhotoLibraryService()
     @StateObject private var trashService = TrashService.shared
     @StateObject private var statsService = StatsService.shared
-    
+
+    @State private var selectedTab: HomeTab = .years
     @State private var hasAppeared = false
     @State private var cachedYears: [YearBucket] = []
+    @State private var cachedMonths: [MonthBucket] = []
     
     var body: some View {
         NavigationStack {
@@ -53,9 +62,11 @@ struct HomeView: View {
             .onChange(of: libraryService.state) { _, newValue in
                 if case .loaded(let years) = newValue {
                     cachedYears = years
+                    cachedMonths = libraryService.monthBuckets
                 }
                 if case .empty = newValue {
                     cachedYears = []
+                    cachedMonths = []
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
@@ -105,13 +116,15 @@ struct HomeView: View {
     }
     
     private func yearsList(_ years: [YearBucket]) -> some View {
-        ScrollView {
+        let months = cachedMonths.isEmpty ? libraryService.monthBuckets : cachedMonths
+
+        return ScrollView {
             LazyVStack(spacing: Spacing.sm) {
                 // Stats card (always visible)
                 StatsCardView(statsService: statsService)
                     .padding(.horizontal, Spacing.md)
                     .padding(.top, Spacing.xs)
-                
+
                 // Limited access banner
                 if permissionService.status.isLimited {
                     InfoBanner(
@@ -123,33 +136,62 @@ struct HomeView: View {
                     }
                     .padding(.horizontal, Spacing.md)
                 }
-                
-                // Years section header
-                HStack {
-                    Text("Years")
-                        .font(Typography.title2)
-                        .foregroundStyle(Color.scTextPrimary)
+
+                // Tab toggle header
+                HStack(spacing: Spacing.md) {
+                    TabHeaderButton(
+                        title: "Years",
+                        isSelected: selectedTab == .years
+                    ) {
+                        selectedTab = .years
+                    }
+
+                    TabHeaderButton(
+                        title: "Months",
+                        isSelected: selectedTab == .months
+                    ) {
+                        selectedTab = .months
+                    }
+
                     Spacer()
                 }
                 .padding(.horizontal, Spacing.md)
                 .padding(.top, Spacing.sm)
-                
-                // Year cards
-                ForEach(years) { bucket in
-                    NavigationLink {
-                        YearGridView(
-                            year: bucket.year,
-                            itemCount: bucket.count,
-                            permissionService: permissionService
-                        )
-                    } label: {
-                        YearCardContent(year: bucket.year, count: bucket.count, totalBytes: bucket.totalBytes)
+
+                // Content based on selected tab
+                if selectedTab == .years {
+                    // Year cards
+                    ForEach(years) { bucket in
+                        NavigationLink {
+                            YearGridView(
+                                year: bucket.year,
+                                itemCount: bucket.count,
+                                permissionService: permissionService
+                            )
+                        } label: {
+                            YearCardContent(year: bucket.year, count: bucket.count, totalBytes: bucket.totalBytes)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("yearCard_\(bucket.year)")
+                        .padding(.horizontal, Spacing.md)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("yearCard_\(bucket.year)")
-                    .padding(.horizontal, Spacing.md)
+                } else {
+                    // Month cards
+                    ForEach(months) { bucket in
+                        NavigationLink {
+                            MonthGridView(
+                                bucket: bucket,
+                                permissionService: permissionService
+                            )
+                        } label: {
+                            MonthCardContent(bucket: bucket)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("monthCard_\(bucket.id)")
+                        .padding(.horizontal, Spacing.md)
+                    }
                 }
-                
+
                 // Bottom spacer for floating button
                 if trashService.trashCount > 0 {
                     Color.clear
@@ -197,6 +239,23 @@ struct HomeView: View {
 private extension HomeView {
     var totalCount: Int {
         libraryService.state.years.reduce(0) { $0 + $1.count }
+    }
+}
+
+// MARK: - Tab Header Button
+
+private struct TabHeaderButton: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(Typography.title2)
+                .foregroundStyle(isSelected ? Color.scTextPrimary : Color.scTextDisabled)
+        }
+        .buttonStyle(.plain)
     }
 }
 

@@ -232,6 +232,64 @@ struct YearCardContent: View {
     }
 }
 
+// MARK: - Month Card
+
+/// Month card content (for use with NavigationLink or Button)
+struct MonthCardContent: View {
+    let bucket: MonthBucket
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                Text(bucket.displayName)
+                    .font(Typography.title2)
+                    .foregroundStyle(Color.scTextPrimary)
+
+                HStack {
+                    Text(countText)
+                        .font(Typography.subheadline)
+                        .foregroundStyle(Color.scTextSecondary)
+
+                    Spacer()
+
+                    Text(sizeText)
+                        .font(Typography.subheadline)
+                        .foregroundStyle(Color.scTextDisabled)
+                }
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Color.scTextDisabled)
+        }
+        .padding(Spacing.md)
+        .scCardStyle()
+    }
+
+    private var countText: String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        let formattedCount = formatter.string(from: NSNumber(value: bucket.count)) ?? "\(bucket.count)"
+        return "\(formattedCount) media"
+    }
+
+    private var sizeText: String {
+        let bytes = Double(bucket.totalBytes)
+        let gb = bytes / 1_073_741_824 // 1024^3
+        let mb = bytes / 1_048_576 // 1024^2
+
+        if gb >= 1.0 {
+            return String(format: "%.1f GB", gb)
+        } else if mb >= 1.0 {
+            return String(format: "%.1f MB", mb)
+        } else {
+            return "< 1 MB"
+        }
+    }
+}
+
 // MARK: - Trash Card
 
 /// Trash card content (for use with NavigationLink)

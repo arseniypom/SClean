@@ -17,6 +17,30 @@ nonisolated struct IndexedAsset: Codable, Equatable, Identifiable, Sendable {
     let lastKnownChangeDate: Date
 }
 
+// MARK: - Month Bucket
+
+/// Aggregated month for UI
+nonisolated struct MonthBucket: Identifiable, Equatable, Sendable {
+    let id: String       // "2024-03" for uniqueness
+    let year: Int
+    let month: Int       // 1-12
+    let count: Int
+    let totalBytes: Int64
+
+    var displayName: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM yyyy"  // "March 2024"
+        var components = DateComponents()
+        components.year = year
+        components.month = month
+        components.day = 1
+        guard let date = Calendar.current.date(from: components) else {
+            return "\(month)/\(year)"
+        }
+        return formatter.string(from: date)
+    }
+}
+
 // MARK: - Library Index Snapshot
 
 nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
@@ -50,7 +74,7 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
         try container.encode(assets, forKey: .assets)
     }
 
-    /// Aggregated buckets for UI
+    /// Aggregated year buckets for UI
     var yearBuckets: [YearBucket] {
         guard !assets.isEmpty else { return [] }
 
@@ -63,6 +87,25 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
         return counts
             .map { YearBucket(year: $0.key, count: $0.value.count, totalBytes: $0.value.bytes) }
             .sorted { $0.year > $1.year }
+    }
+
+    /// Aggregated month buckets for UI (derived from lastKnownChangeDate)
+    var monthBuckets: [MonthBucket] {
+        guard !assets.isEmpty else { return [] }
+        let calendar = Calendar.current
+
+        var counts: [String: (year: Int, month: Int, count: Int, bytes: Int64)] = [:]
+        for asset in assets {
+            let month = calendar.component(.month, from: asset.lastKnownChangeDate)
+            let key = "\(asset.year)-\(String(format: "%02d", month))"
+            let current = counts[key] ?? (asset.year, month, 0, 0)
+            counts[key] = (current.year, current.month, current.count + 1, current.bytes + asset.byteSize)
+        }
+
+        return counts
+            .map { MonthBucket(id: $0.key, year: $0.value.year, month: $0.value.month,
+                               count: $0.value.count, totalBytes: $0.value.bytes) }
+            .sorted { ($0.year, $0.month) > ($1.year, $1.month) }  // Newest first
     }
 }
 
