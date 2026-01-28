@@ -27,10 +27,7 @@ struct MediaViewerView: View {
     @State private var currentIndex: Int
     @State private var prefetchTasks: [String: Task<Void, Never>] = [:]
     @State private var toast: ToastData?
-    @State private var hasSeenBrowseHint: Bool
-    @State private var hasSeenTrashHint: Bool
-    @State private var swipeCount: Int = 0
-    @State private var showTrashTip: Bool = false
+    @State private var showOnboarding: Bool
     @State private var currentAssetSize: Int64?
     @State private var isTrashAnimating = false
     @State private var previewAssetID: String?
@@ -70,13 +67,13 @@ struct MediaViewerView: View {
         self.year = year
         self.permissionService = permissionService
         self._currentIndex = State(initialValue: startIndex)
-        // Migrate hint flags from old keys if needed
-        let browseSeen = UserDefaults.standard.bool(forKey: "SlideClean.hasSeenBrowseHint") ||
-            UserDefaults.standard.bool(forKey: "SClean.hasSeenBrowseHint")
-        let trashSeen = UserDefaults.standard.bool(forKey: "SlideClean.hasSeenTrashHint") ||
+        // Check all legacy keys for migration
+        let hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "SClean.hasCompletedViewerOnboarding") ||
+            UserDefaults.standard.bool(forKey: "SlideClean.hasSeenBrowseHint") ||
+            UserDefaults.standard.bool(forKey: "SClean.hasSeenBrowseHint") ||
+            UserDefaults.standard.bool(forKey: "SlideClean.hasSeenTrashHint") ||
             UserDefaults.standard.bool(forKey: "SClean.hasSeenTrashHint")
-        self._hasSeenBrowseHint = State(initialValue: browseSeen)
-        self._hasSeenTrashHint = State(initialValue: trashSeen)
+        self._showOnboarding = State(initialValue: !hasCompletedOnboarding)
     }
     
     var body: some View {
@@ -88,16 +85,6 @@ struct MediaViewerView: View {
                 doneView
             } else {
                 pagingContent
-            }
-            
-            // First-time browse hint
-            if !hasSeenBrowseHint && !visibleAssets.isEmpty {
-                browseHint
-            }
-
-            // One-time trash tip after some browsing
-            if showTrashTip && !visibleAssets.isEmpty {
-                trashTip
             }
 
             // Access changed overlay
@@ -161,13 +148,6 @@ struct MediaViewerView: View {
         .onChange(of: currentIndex) { _, _ in
             prefetchAdjacent()
             fetchCurrentAssetSize()
-            // Count browsing swipes
-            swipeCount += 1
-            if !hasSeenTrashHint && !showTrashTip && swipeCount >= 8 {
-                withAnimation(.easeInOut(duration: AnimationDuration.fast)) {
-                    showTrashTip = true
-                }
-            }
         }
         .onDisappear {
             cancelAllPrefetch()
@@ -176,6 +156,9 @@ struct MediaViewerView: View {
             permissionService.refreshStatus()
         }
         .undoToast($toast)
+        .sheet(isPresented: $showOnboarding) {
+            ViewerOnboardingView()
+        }
     }
     
     // MARK: - Paging Content
@@ -397,97 +380,6 @@ struct MediaViewerView: View {
         .padding(Spacing.xl)
     }
     
-    // MARK: - First Time Hint
-    
-    private var browseHint: some View {
-        VStack {
-            Spacer()
-            
-            VStack(spacing: Spacing.sm) {
-                Image(systemName: "arrow.left.and.right")
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(.white)
-
-                Text("Swipe left/right to browse")
-                    .font(Typography.subheadline)
-                    .foregroundStyle(.white)
-                Text("Swipe up to move to Trash")
-                    .font(Typography.caption1)
-                    .foregroundStyle(.white.opacity(0.8))
-            }
-            .padding(Spacing.lg)
-            .background(.black.opacity(0.7))
-            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
-            .padding(.bottom, Spacing.xxl * 2)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.black.opacity(0.3))
-        .onTapGesture {
-            dismissBrowseHint()
-        }
-        .onAppear {
-            // Auto-fade after a short delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                dismissBrowseHint()
-            }
-        }
-    }
-
-    private var trashTip: some View {
-        VStack {
-            Spacer()
-
-            HStack {
-                Spacer()
-                
-                VStack(spacing: Spacing.xs) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(.white)
-                    Text("Tip: Swipe up to move to Trash")
-                        .font(Typography.caption1)
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-                }
-                .padding(Spacing.md)
-                .background(.black.opacity(0.7))
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
-                .padding(.trailing, Spacing.lg)
-            }
-            .padding(.bottom, Spacing.xxl)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.black.opacity(0.001)) // tap-through safe background
-        .onTapGesture {
-            dismissTrashTip()
-        }
-        .onAppear {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                dismissTrashTip()
-            }
-        }
-    }
-
-    private func dismissBrowseHint() {
-        guard !hasSeenBrowseHint else { return }
-        withAnimation(.easeOut(duration: AnimationDuration.fast)) {
-            hasSeenBrowseHint = true
-        }
-        UserDefaults.standard.set(true, forKey: "SlideClean.hasSeenBrowseHint")
-    }
-
-    private func dismissTrashTip() {
-        if showTrashTip {
-            withAnimation(.easeOut(duration: AnimationDuration.fast)) {
-                showTrashTip = false
-            }
-        }
-        if !hasSeenTrashHint {
-            hasSeenTrashHint = true
-            UserDefaults.standard.set(true, forKey: "SlideClean.hasSeenTrashHint")
-        }
-    }
-
     // MARK: - Access Changed Overlay
     private var accessChangedOverlay: some View {
         VStack {
@@ -527,15 +419,10 @@ struct MediaViewerView: View {
     
     private func trashItem(at index: Int) {
         guard index < assets.count else { return }
-        
+
         let asset = assets[index]
         let assetID = asset.id
-        
-        // Dismiss hint on first trash
-        if !hasSeenTrashHint {
-            dismissTrashTip()
-        }
-        
+
         // Trash the item
         trashService.trash(assetID)
         
