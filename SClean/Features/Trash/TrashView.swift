@@ -309,6 +309,7 @@ struct TrashViewWithNavigation: View {
     @State private var deletionResult: DeletionResult?
     @State private var showResult = false
     @State private var showSuccessEmptyState = false
+    @State private var showRestoreAllConfirmation = false
     
     private let columns = [
         GridItem(.flexible(), spacing: 2),
@@ -335,7 +336,7 @@ struct TrashViewWithNavigation: View {
             if isSelectionMode && !selectedIDs.isEmpty {
                 selectionActionBar
             } else if trashService.trashCount > 0 && !isDeleting {
-                floatingEmptyTrashButton
+                floatingActionBar
             }
             
             // Deletion progress overlay
@@ -394,6 +395,14 @@ struct TrashViewWithNavigation: View {
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
             }
+        }
+        .alert("Restore All Items?", isPresented: $showRestoreAllConfirmation) {
+            Button("Restore All") {
+                restoreAll()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("All \(trashService.trashCount) items will be restored to your library.")
         }
         .onAppear {
             if !hasCheckedAvailability {
@@ -520,22 +529,38 @@ struct TrashViewWithNavigation: View {
         .padding(Spacing.xl)
     }
 
-    // MARK: - Floating Empty Trash Button
-    
-    private var floatingEmptyTrashButton: some View {
+    // MARK: - Floating Action Bar
+
+    private var floatingActionBar: some View {
         VStack {
             Spacer()
-            
-            HStack {
-                Spacer()
-                
+
+            HStack(spacing: Spacing.md) {
+                // Restore All button
+                Button {
+                    showRestoreAllConfirmation = true
+                } label: {
+                    HStack(spacing: Spacing.xs) {
+                        Image(systemName: "arrow.uturn.backward")
+                            .font(.system(size: 18, weight: .semibold))
+
+                        Text("Restore All")
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                    }
+                    .foregroundStyle(Color.scTint)
+                    .padding(.horizontal, Spacing.md)
+                    .padding(.vertical, Spacing.sm)
+                    .scFloatingButtonStyle()
+                }
+
+                // Empty Trash button
                 Button {
                     showConfirmation = true
                 } label: {
                     HStack(spacing: Spacing.xs) {
                         Image(systemName: "trash")
                             .font(.system(size: 18, weight: .semibold))
-                        
+
                         Text("Empty Trash")
                             .font(.system(size: 16, weight: .bold, design: .rounded))
                     }
@@ -544,9 +569,7 @@ struct TrashViewWithNavigation: View {
                     .padding(.vertical, Spacing.sm)
                     .scFloatingButtonStyle()
                 }
-                .disabled(trashService.trashCount == 0 || isDeleting)
-                
-                Spacer()
+                .disabled(isDeleting)
             }
             .padding(.bottom, Spacing.lg)
         }
@@ -618,18 +641,27 @@ struct TrashViewWithNavigation: View {
     
     private func restoreSelected() {
         guard !selectedIDs.isEmpty else { return }
-        
+
         let generator = UIImpactFeedbackGenerator(style: .light)
         generator.impactOccurred()
-        
+
         trashService.restoreMultiple(selectedIDs)
-        
+
         withAnimation(.easeInOut(duration: AnimationDuration.fast)) {
             selectedIDs.removeAll()
             isSelectionMode = false
         }
     }
-    
+
+    private func restoreAll() {
+        guard trashService.trashCount > 0 else { return }
+
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+
+        trashService.restoreMultiple(trashService.trashedIDs)
+    }
+
     private func checkAndCleanupUnavailable() {
         Task {
             var toRemove: Set<String> = []
