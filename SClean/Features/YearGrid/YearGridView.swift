@@ -134,13 +134,17 @@ struct YearGridView: View {
     
     // MARK: - Grid View
     
-    private func gridView(_ assets: [YearAsset]) -> some View {
-        GeometryReader { proxy in
+    private func gridView(_ originalAssets: [YearAsset]) -> some View {
+        // Filter out trashed and permanently deleted items
+        let excludedIDs = trashService.excludedIDs
+        let assets = originalAssets.filter { !excludedIDs.contains($0.id) }
+
+        return GeometryReader { proxy in
             let horizontalPadding: CGFloat = 2 * 2 // .padding(.horizontal, 2)
             let spacing: CGFloat = 2
             let totalSpacing: CGFloat = spacing * 2 // 3 columns -> 2 gaps
             let side = (proxy.size.width - horizontalPadding - totalSpacing) / 3
-            
+
             ScrollView {
                 VStack(spacing: 0) {
                     // Limited Access banner
@@ -155,7 +159,7 @@ struct YearGridView: View {
                         .padding(.horizontal, Spacing.md)
                         .padding(.vertical, Spacing.sm)
                     }
-                    
+
                     // Photo grid
                     LazyVGrid(columns: columns, spacing: spacing) {
                         ForEach(assets.indices, id: \.self) { index in
@@ -182,24 +186,16 @@ struct YearGridView: View {
     }
     
     // MARK: - Grid Cell
-    
+
     @ViewBuilder
     private func gridCell(for asset: YearAsset, size: CGFloat) -> some View {
-        let isTrashed = trashService.isTrashed(asset.id)
-
         ThumbnailImageView(assetID: asset.id)
-            .opacity(isTrashed ? 0.5 : 1.0)
             .frame(width: size, height: size)
             .clipped()
             // Overlays applied AFTER frame/clip so they use fixed bounds
             .overlay(alignment: .bottomTrailing) {
                 if asset.isVideo {
                     videoDurationBadge(duration: asset.duration)
-                }
-            }
-            .overlay(alignment: .bottomLeading) {
-                if isTrashed {
-                    trashedBadge
                 }
             }
     }
@@ -219,16 +215,6 @@ struct YearGridView: View {
         let minutes = Int(duration) / 60
         let seconds = Int(duration) % 60
         return String(format: "%d:%02d", minutes, seconds)
-    }
-
-    private var trashedBadge: some View {
-        Image(systemName: "trash.fill")
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(.white)
-            .padding(5)
-            .background(.black.opacity(0.6))
-            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-            .padding(4)
     }
 
     // MARK: - Actions

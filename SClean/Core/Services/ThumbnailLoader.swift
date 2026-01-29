@@ -7,7 +7,6 @@
 
 import Photos
 import SwiftUI
-import Combine
 
 // MARK: - Thumbnail Loader
 
@@ -19,7 +18,7 @@ import Combine
 nonisolated let gridThumbnailSize = CGSize(width: 150, height: 150)
 
 @MainActor
-final class ThumbnailLoader: ObservableObject {
+final class ThumbnailLoader {
     
     // Singleton for shared caching
     static let shared = ThumbnailLoader()

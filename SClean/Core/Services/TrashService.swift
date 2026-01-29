@@ -51,6 +51,14 @@ final class TrashService: ObservableObject {
         trashedItems.map(\.assetID)
     }
 
+    /// IDs permanently deleted this session (not persisted, resets on app launch)
+    private(set) var permanentlyDeletedIDs: Set<String> = []
+
+    /// All IDs to exclude from display (trashed + permanently deleted)
+    var excludedIDs: Set<String> {
+        trashedIDs.union(permanentlyDeletedIDs)
+    }
+
     private let userDefaultsKey = "SlideClean.trashedItems"
 
     // Legacy key for migration
@@ -140,6 +148,7 @@ final class TrashService: ObservableObject {
     /// Mark assets as permanently deleted (removes from trash)
     /// Call this after successful deletion from photo library
     func markDeleted(_ assetIDs: [String]) {
+        permanentlyDeletedIDs.formUnion(assetIDs)
         remove(Set(assetIDs))
     }
     
