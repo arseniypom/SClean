@@ -15,7 +15,7 @@ struct MediaViewerView: View {
     @ObservedObject var permissionService: PhotoPermissionService
 
     @StateObject private var trashService = TrashService.shared
-    @State private var currentIndex: Int
+    @StateObject private var animationState: SwipeToTrashAnimationState
     @State private var prefetchTasks: [String: Task<Void, Never>] = [:]
     @State private var toast: ToastData?
     @State private var showOnboarding: Bool
@@ -24,6 +24,11 @@ struct MediaViewerView: View {
 
     /// Number of items to prefetch in each direction
     private let prefetchRange = 2
+
+    /// Computed accessor for current index (maintained by animation state)
+    private var currentIndex: Int {
+        get { animationState.currentIndex }
+    }
 
     /// Current asset for the active page
     private var currentAsset: YearAsset? {
@@ -54,7 +59,7 @@ struct MediaViewerView: View {
         self.startIndex = startIndex
         self.year = year
         self.permissionService = permissionService
-        self._currentIndex = State(initialValue: startIndex)
+        self._animationState = StateObject(wrappedValue: SwipeToTrashAnimationState(currentIndex: startIndex))
         // Check all legacy keys for migration
         let hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "SClean.hasCompletedViewerOnboarding") ||
             UserDefaults.standard.bool(forKey: "SlideClean.hasSeenBrowseHint") ||
@@ -119,7 +124,7 @@ struct MediaViewerView: View {
             prefetchAdjacent()
             fetchCurrentAssetSize()
         }
-        .onChange(of: currentIndex) { _, _ in
+        .onChange(of: animationState.currentIndex) { _, _ in
             prefetchAdjacent()
             fetchCurrentAssetSize()
         }
@@ -137,12 +142,23 @@ struct MediaViewerView: View {
 
     // MARK: - Paging Content
 
+    /// Binding for TabView selection that syncs with animation state
+    private var currentIndexBinding: Binding<Int> {
+        Binding(
+            get: { animationState.currentIndex },
+            set: { animationState.currentIndex = $0 }
+        )
+    }
+
     private var pagingContent: some View {
         ZStack {
             Color.black
 
+            // Preview layer - next photo visible underneath during swipe
+            previewLayer
+
             // Main TabView
-            TabView(selection: $currentIndex) {
+            TabView(selection: currentIndexBinding) {
                 ForEach(Array(assets.enumerated()), id: \.element.id) { index, asset in
                     pageView(for: index, asset: asset)
                         .tag(index)
@@ -157,8 +173,24 @@ struct MediaViewerView: View {
         }
     }
 
+    // MARK: - Preview Layer (Deck Effect)
+
+    @ViewBuilder
+    private var previewLayer: some View {
+        if animationState.isAnimating,
+           let previewID = animationState.previewAssetID,
+           let previewAsset = assets.first(where: { $0.id == previewID }) {
+            MediaPageView(
+                asset: previewAsset,
+                isCurrentPage: false,
+                isTrashed: false
+            )
+        }
+    }
+
     private func pageView(for index: Int, asset: YearAsset) -> some View {
         let isTrashed = trashService.isTrashed(asset.id)
+        let nextAsset = findNextVisibleAsset(from: index)
 
         return MediaPageView(
             asset: asset,
@@ -167,10 +199,42 @@ struct MediaViewerView: View {
         ) {
             trashService.restore(asset.id)
         }
-        .swipeToTrash(isEnabled: !isTrashed) {
-            trashItem(at: index)
-        }
+        .swipeToTrash(
+            isEnabled: !isTrashed,
+            onDragStart: {
+                // Show preview of next photo underneath
+                if let next = nextAsset {
+                    animationState.startAnimation(nextAssetID: next.id)
+                }
+            },
+            onDragProgress: { progress in
+                animationState.updateDragProgress(progress)
+            },
+            onDragCancel: {
+                animationState.cancelAnimation()
+            },
+            onTrash: {
+                trashItem(at: index)
+            }
+        )
         .accessibilityIdentifier(index == currentIndex ? "currentPhotoView" : "photoView_\(index)")
+    }
+
+    /// Find the next visible (non-trashed) asset from a given index
+    private func findNextVisibleAsset(from index: Int) -> YearAsset? {
+        // Try forward first
+        for i in (index + 1)..<assets.count {
+            if !trashService.isTrashed(assets[i].id) {
+                return assets[i]
+            }
+        }
+        // Then try backward
+        for i in stride(from: index - 1, through: 0, by: -1) {
+            if !trashService.isTrashed(assets[i].id) {
+                return assets[i]
+            }
+        }
+        return nil
     }
 
     // MARK: - Counter View
@@ -371,11 +435,13 @@ struct MediaViewerView: View {
             trashService.restore(assetID)
         }
 
-        // Advance to next visible
+        // Advance to next visible using animation state
         if let nextIndex {
-            currentIndex = nextIndex
+            animationState.completeAnimation(nextIndex: nextIndex)
+        } else {
+            // No more visible items - reset animation state
+            animationState.reset()
         }
-        // If nextIndex is nil, visibleAssets becomes empty and doneView shows
     }
 
     private func nextVisibleIndex(from index: Int) -> Int? {
@@ -397,13 +463,13 @@ struct MediaViewerView: View {
     // MARK: - Tap Navigation
 
     private func goToPrevious() {
-        guard currentIndex > 0 else { return }
-        currentIndex -= 1
+        guard animationState.currentIndex > 0 else { return }
+        animationState.currentIndex -= 1
     }
 
     private func goToNext() {
-        guard currentIndex < assets.count - 1 else { return }
-        currentIndex += 1
+        guard animationState.currentIndex < assets.count - 1 else { return }
+        animationState.currentIndex += 1
     }
 
     private func handleEdgeTap(at location: CGPoint) {

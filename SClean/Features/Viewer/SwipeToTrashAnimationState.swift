@@ -21,7 +21,12 @@ final class SwipeToTrashAnimationState: ObservableObject {
 
     @Published private(set) var isAnimating = false
     @Published private(set) var previewAssetID: String?
-    @Published private(set) var currentIndex: Int
+    /// Current page index. Settable for TabView binding and direct navigation.
+    @Published var currentIndex: Int
+
+    /// Drag progress from 0.0 (start) to 1.0 (threshold reached).
+    /// Used by preview layer to sync reveal with drag gesture.
+    @Published private(set) var dragProgress: CGFloat = 0
 
     // MARK: - Testing Support
 
@@ -53,6 +58,28 @@ final class SwipeToTrashAnimationState: ObservableObject {
         }
     }
 
+    /// Called continuously during drag to update progress.
+    /// Progress is clamped to 0.0...1.0 range.
+    func updateDragProgress(_ progress: CGFloat) {
+        dragProgress = min(1.0, max(0.0, progress))
+
+        if recordTransitions {
+            transitionLog.append(("dragProgress=\(dragProgress)", Date()))
+        }
+    }
+
+    /// Called when drag is cancelled (released before threshold).
+    /// Resets animation state without changing index.
+    func cancelAnimation() {
+        if recordTransitions {
+            transitionLog.append(("cancelAnimation", Date()))
+        }
+
+        dragProgress = 0
+        isAnimating = false
+        previewAssetID = nil
+    }
+
     /// Called when swipe animation completes.
     ///
     /// CRITICAL: This method ensures `isAnimating` becomes `false` BEFORE
@@ -63,6 +90,7 @@ final class SwipeToTrashAnimationState: ObservableObject {
         if recordTransitions {
             transitionLog.append(("isAnimating=false", Date()))
         }
+        dragProgress = 0
         isAnimating = false
         previewAssetID = nil
 
@@ -82,6 +110,7 @@ final class SwipeToTrashAnimationState: ObservableObject {
         if recordTransitions {
             transitionLog.append(("reset", Date()))
         }
+        dragProgress = 0
         isAnimating = false
         previewAssetID = nil
     }

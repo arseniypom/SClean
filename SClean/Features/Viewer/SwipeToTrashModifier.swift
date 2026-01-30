@@ -11,8 +11,14 @@ struct SwipeToTrashModifier: ViewModifier {
     let isEnabled: Bool
     let onTrash: () -> Void
 
+    // Deck-of-cards reveal callbacks
+    let onDragStart: (() -> Void)?
+    let onDragProgress: ((CGFloat) -> Void)?
+    let onDragCancel: (() -> Void)?
+
     @State private var dragOffset: CGFloat = 0
     @State private var isDragging = false
+    @State private var hasNotifiedStart = false
 
     /// Threshold distance to commit trash action
     private let trashThreshold: CGFloat = 90
@@ -72,9 +78,20 @@ struct SwipeToTrashModifier: ViewModifier {
                 let dx = abs(value.translation.width)
                 // Require clear vertical intent to avoid stealing horizontal swipes
                 guard dy < -12, abs(dy) > (dx + 10) else {
+                    // Cancel if we were dragging but gesture changed direction
+                    if hasNotifiedStart {
+                        onDragCancel?()
+                        hasNotifiedStart = false
+                    }
                     dragOffset = 0
                     isDragging = false
                     return
+                }
+
+                // Notify drag start once
+                if !hasNotifiedStart {
+                    onDragStart?()
+                    hasNotifiedStart = true
                 }
 
                 isDragging = true
@@ -90,6 +107,9 @@ struct SwipeToTrashModifier: ViewModifier {
                 }
 
                 dragOffset = max(dragOffset, -maxOffset)
+
+                // Notify progress for deck reveal effect
+                onDragProgress?(trashProgress)
             }
             .onEnded { _ in
                 let shouldTrash = abs(dragOffset) >= trashThreshold
@@ -101,11 +121,15 @@ struct SwipeToTrashModifier: ViewModifier {
 
                     // Immediately trash - no animation delay
                     onTrash()
+                } else if hasNotifiedStart {
+                    // Cancelled - notify parent to hide preview
+                    onDragCancel?()
                 }
 
                 // Reset state
                 dragOffset = 0
                 isDragging = false
+                hasNotifiedStart = false
             }
     }
 }
@@ -115,11 +139,17 @@ struct SwipeToTrashModifier: ViewModifier {
 extension View {
     func swipeToTrash(
         isEnabled: Bool = true,
+        onDragStart: (() -> Void)? = nil,
+        onDragProgress: ((CGFloat) -> Void)? = nil,
+        onDragCancel: (() -> Void)? = nil,
         onTrash: @escaping () -> Void
     ) -> some View {
         modifier(SwipeToTrashModifier(
             isEnabled: isEnabled,
-            onTrash: onTrash
+            onTrash: onTrash,
+            onDragStart: onDragStart,
+            onDragProgress: onDragProgress,
+            onDragCancel: onDragCancel
         ))
     }
 }
