@@ -8,59 +8,47 @@
 import SwiftUI
 import Photos
 
-// MARK: - Trash Icon Position Key
-
-private struct TrashIconPositionKey: PreferenceKey {
-    static var defaultValue: CGPoint = .zero
-    static func reduce(value: inout CGPoint, nextValue: () -> CGPoint) {
-        value = nextValue()
-    }
-}
-
 struct MediaViewerView: View {
     let assets: [YearAsset]
     let startIndex: Int
     let year: Int
     @ObservedObject var permissionService: PhotoPermissionService
-    
+
     @StateObject private var trashService = TrashService.shared
     @State private var currentIndex: Int
     @State private var prefetchTasks: [String: Task<Void, Never>] = [:]
     @State private var toast: ToastData?
     @State private var showOnboarding: Bool
     @State private var currentAssetSize: Int64?
-    @State private var isTrashAnimating = false
-    @State private var previewAssetID: String?
-    @State private var trashIconPosition: CGPoint = .zero
     @Environment(\.dismiss) private var dismiss
-    
+
     /// Number of items to prefetch in each direction
     private let prefetchRange = 2
-    
+
     /// Current asset for the active page
     private var currentAsset: YearAsset? {
         guard currentIndex < assets.count else { return nil }
         return assets[currentIndex]
     }
-    
+
     /// Assets that haven't been trashed
     private var visibleAssets: [YearAsset] {
         assets.filter { !trashService.isTrashed($0.id) }
     }
-    
+
     /// Current visible index (accounting for trashed items)
     private var currentVisibleIndex: Int {
         // Find the position of current asset in visible list
         guard let currentAsset else { return 0 }
         return visibleAssets.firstIndex(where: { $0.id == currentAsset.id }) ?? 0
     }
-    
+
     /// Whether the active page is already in the in-app trash
     private var isCurrentAssetTrashed: Bool {
         guard let currentAsset else { return false }
         return trashService.isTrashed(currentAsset.id)
     }
-    
+
     init(assets: [YearAsset], startIndex: Int, year: Int, permissionService: PhotoPermissionService) {
         self.assets = assets
         self.startIndex = startIndex
@@ -75,12 +63,12 @@ struct MediaViewerView: View {
             UserDefaults.standard.bool(forKey: "SClean.hasSeenTrashHint")
         self._showOnboarding = State(initialValue: !hasCompletedOnboarding)
     }
-    
+
     var body: some View {
         ZStack {
             Color.black
                 .ignoresSafeArea()
-            
+
             if visibleAssets.isEmpty {
                 doneView
             } else {
@@ -99,7 +87,7 @@ struct MediaViewerView: View {
             ToolbarItem(placement: .principal) {
                 counterView
             }
-            
+
             // Trash icon - opens trash screen
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink {
@@ -122,23 +110,9 @@ struct MediaViewerView: View {
                                 .offset(x: 8, y: -6)
                         }
                     }
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear.preference(
-                                key: TrashIconPositionKey.self,
-                                value: CGPoint(
-                                    x: geo.frame(in: .global).midX,
-                                    y: geo.frame(in: .global).midY
-                                )
-                            )
-                        }
-                    )
                 }
                 .accessibilityLabel("Trash (\(trashService.trashCount) items)")
             }
-        }
-        .onPreferenceChange(TrashIconPositionKey.self) { position in
-            trashIconPosition = position
         }
         .statusBarHidden(false)
         .onAppear {
@@ -160,34 +134,14 @@ struct MediaViewerView: View {
             ViewerOnboardingView()
         }
     }
-    
+
     // MARK: - Paging Content
-    
+
     private var pagingContent: some View {
         ZStack {
-            // Static black background - doesn't animate with swipe-to-trash
             Color.black
 
-            // Next photo preview - uses CAPTURED asset ID (stable during animation)
-            // Shows behind the current page during fly-to-trash animation
-            // Wrapped in TabView to guarantee identical layout context as main TabView pages
-            if let previewID = previewAssetID,
-               let previewAsset = assets.first(where: { $0.id == previewID }) {
-                TabView {
-                    MediaPageView(
-                        asset: previewAsset,
-                        isCurrentPage: false,
-                        isTrashed: false
-                    ) { }
-                    .tag(0)
-                }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .opacity(isTrashAnimating ? 1.0 : 0)
-                .allowsHitTesting(false)
-                .accessibilityIdentifier("previewPhotoView")
-            }
-
-            // Main TabView (on top)
+            // Main TabView
             TabView(selection: $currentIndex) {
                 ForEach(Array(assets.enumerated()), id: \.element.id) { index, asset in
                     pageView(for: index, asset: asset)
@@ -213,25 +167,12 @@ struct MediaViewerView: View {
         ) {
             trashService.restore(asset.id)
         }
-        .swipeToTrash(
-            isEnabled: !isTrashed,
-            targetPosition: trashIconPosition,
-            onAnimationStart: {
-                // Capture the next photo ID BEFORE animation starts
-                if let nextIndex = nextVisibleIndex(from: index) {
-                    previewAssetID = assets[nextIndex].id
-                }
-                // Animate preview IN (scale 0.92→1.0, opacity 0→1)
-                withAnimation(.easeOut(duration: 0.35)) {
-                    isTrashAnimating = true
-                }
-            }
-        ) {
+        .swipeToTrash(isEnabled: !isTrashed) {
             trashItem(at: index)
         }
         .accessibilityIdentifier(index == currentIndex ? "currentPhotoView" : "photoView_\(index)")
     }
-    
+
     // MARK: - Counter View
 
     private var counterView: some View {
@@ -317,32 +258,32 @@ struct MediaViewerView: View {
             }
         }
     }
-    
+
     // MARK: - Done View
-    
+
     private var doneView: some View {
         VStack(spacing: Spacing.lg) {
             ZStack {
                 Circle()
                     .fill(Color.scSuccess.opacity(0.15))
                     .frame(width: 100, height: 100)
-                
+
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 48, weight: .medium))
                     .foregroundStyle(Color.scSuccess)
             }
-            
+
             VStack(spacing: Spacing.xs) {
                 Text("All Done!")
                     .font(Typography.title2)
                     .foregroundStyle(.white)
-                
+
                 Text("You've reviewed all items in \(year)")
                     .font(Typography.body)
                     .foregroundStyle(.white.opacity(0.7))
                     .multilineTextAlignment(.center)
             }
-            
+
             VStack(spacing: Spacing.sm) {
                 Button {
                     dismiss()
@@ -355,7 +296,7 @@ struct MediaViewerView: View {
                         .background(.white.opacity(0.15))
                         .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
                 }
-                
+
                 // Go to Trash button
                 if trashService.trashCount > 0 {
                     NavigationLink {
@@ -379,12 +320,12 @@ struct MediaViewerView: View {
         }
         .padding(Spacing.xl)
     }
-    
+
     // MARK: - Access Changed Overlay
     private var accessChangedOverlay: some View {
         VStack {
             Spacer()
-            
+
             VStack(spacing: Spacing.sm) {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 24, weight: .medium))
@@ -410,59 +351,31 @@ struct MediaViewerView: View {
         .background(.black.opacity(0.4))
         .ignoresSafeArea()
     }
-    
+
     // MARK: - Trash Actions
-    
-    private func trashCurrentItem() {
-        trashItem(at: currentIndex)
-    }
-    
+
     private func trashItem(at index: Int) {
         guard index < assets.count else { return }
 
         let asset = assets[index]
         let assetID = asset.id
 
+        // Find next visible BEFORE trashing (while current item is still "visible")
+        let nextIndex = nextVisibleIndex(from: index)
+
         // Trash the item
         trashService.trash(assetID)
-        
+
         // Show undo toast
         toast = ToastData(message: "Moved to Trash (not deleted)") {
             trashService.restore(assetID)
         }
 
-        // Advance immediately - no delay needed
-        // SwipeToTrashModifier delays its state reset to avoid flash-back
-        advanceToNextVisible(from: index)
-    }
-    
-    private func advanceToNextVisible(from trashedIndex: Int) {
-        guard let nextIndex = nextVisibleIndex(from: trashedIndex) else {
-            // All items trashed - visibleAssets will be empty and doneView will show
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                isTrashAnimating = false
-                previewAssetID = nil
-            }
-            return
-        }
-
-        // Reset animation state FIRST (instant hide preview)
-        // This prevents the preview from showing wrong photo when currentIndex changes
-        var resetTransaction = Transaction()
-        resetTransaction.disablesAnimations = true
-        withTransaction(resetTransaction) {
-            isTrashAnimating = false
-            previewAssetID = nil
-        }
-
-        // Then change index (no delay needed)
-        var indexTransaction = Transaction()
-        indexTransaction.disablesAnimations = true
-        withTransaction(indexTransaction) {
+        // Advance to next visible
+        if let nextIndex {
             currentIndex = nextIndex
         }
+        // If nextIndex is nil, visibleAssets becomes empty and doneView shows
     }
 
     private func nextVisibleIndex(from index: Int) -> Int? {
@@ -485,16 +398,12 @@ struct MediaViewerView: View {
 
     private func goToPrevious() {
         guard currentIndex > 0 else { return }
-        withAnimation(.easeInOut(duration: AnimationDuration.normal)) {
-            currentIndex -= 1
-        }
+        currentIndex -= 1
     }
 
     private func goToNext() {
         guard currentIndex < assets.count - 1 else { return }
-        withAnimation(.easeInOut(duration: AnimationDuration.normal)) {
-            currentIndex += 1
-        }
+        currentIndex += 1
     }
 
     private func handleEdgeTap(at location: CGPoint) {
@@ -510,33 +419,33 @@ struct MediaViewerView: View {
     }
 
     // MARK: - Prefetching
-    
+
     private func prefetchAdjacent() {
         guard !assets.isEmpty else { return }
-        
+
         // Calculate range to prefetch
         let startPrefetch = max(0, currentIndex - prefetchRange)
         let endPrefetch = min(assets.count - 1, currentIndex + prefetchRange)
-        
+
         guard startPrefetch <= endPrefetch else { return }
-        
+
         // Prefetch assets in range (excluding videos and trashed)
         for index in startPrefetch...endPrefetch {
             let asset = assets[index]
-            
+
             // Skip if trashed, already prefetching, or video
             guard !trashService.isTrashed(asset.id),
                   asset.mediaType != .video,
                   prefetchTasks[asset.id] == nil else {
                 continue
             }
-            
+
             // Start prefetch task
             prefetchTasks[asset.id] = Task {
                 _ = await FullImageLoader.shared.loadFullImage(for: asset.id)
             }
         }
-        
+
         // Cancel prefetch for assets outside range
         let prefetchIDs = Set((startPrefetch...endPrefetch).map { assets[$0].id })
         for (id, task) in prefetchTasks where !prefetchIDs.contains(id) {
@@ -544,7 +453,7 @@ struct MediaViewerView: View {
             prefetchTasks.removeValue(forKey: id)
         }
     }
-    
+
     private func cancelAllPrefetch() {
         for (_, task) in prefetchTasks {
             task.cancel()
@@ -561,7 +470,7 @@ struct MediaViewerView: View {
         YearAsset(id: "2", creationDate: Date(), mediaType: .video, duration: 30),
         YearAsset(id: "3", creationDate: Date(), mediaType: .photo),
     ]
-    
+
     return NavigationStack {
         MediaViewerView(
             assets: sampleAssets,

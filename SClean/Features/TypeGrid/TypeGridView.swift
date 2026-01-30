@@ -119,9 +119,9 @@ struct TypeGridView: View {
     // MARK: - Grid View
 
     private func gridView(_ originalAssets: [YearAsset]) -> some View {
-        // Filter out trashed and permanently deleted items
+        // Filter out trashed and permanently deleted items for DISPLAY only
         let excludedIDs = trashService.excludedIDs
-        let assets = originalAssets.filter { !excludedIDs.contains($0.id) }
+        let filteredAssets = originalAssets.filter { !excludedIDs.contains($0.id) }
 
         return GeometryReader { proxy in
             let horizontalPadding: CGFloat = 2 * 2 // .padding(.horizontal, 2)
@@ -146,12 +146,14 @@ struct TypeGridView: View {
 
                     // Photo grid
                     LazyVGrid(columns: columns, spacing: spacing) {
-                        ForEach(assets.indices, id: \.self) { index in
-                            let asset = assets[index]
+                        ForEach(filteredAssets.indices, id: \.self) { filteredIndex in
+                            let asset = filteredAssets[filteredIndex]
+                            // Find the index in the ORIGINAL array for stable navigation
+                            let originalIndex = originalAssets.firstIndex(where: { $0.id == asset.id }) ?? filteredIndex
                             NavigationLink {
                                 MediaViewerView(
-                                    assets: assets,
-                                    startIndex: index,
+                                    assets: originalAssets,  // Pass ORIGINAL unfiltered array
+                                    startIndex: originalIndex,  // Index in original array
                                     year: Calendar.current.component(.year, from: asset.creationDate),
                                     permissionService: permissionService
                                 )
@@ -160,7 +162,7 @@ struct TypeGridView: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .accessibilityIdentifier("gridPhoto_\(index)")
+                            .accessibilityIdentifier("gridPhoto_\(filteredIndex)")
                         }
                     }
                     .padding(.horizontal, 2)
