@@ -17,6 +17,7 @@ struct MediaViewerView: View {
     @StateObject private var trashService = TrashService.shared
     @StateObject private var animationState: SwipeToTrashAnimationState
     @State private var prefetchTasks: [String: Task<Void, Never>] = [:]
+    @State private var isTabSelectionLocked = false
     @State private var toast: ToastData?
     @State private var showOnboarding: Bool
     @State private var currentAssetSize: Int64?
@@ -146,7 +147,12 @@ struct MediaViewerView: View {
     private var currentIndexBinding: Binding<Int> {
         Binding(
             get: { animationState.currentIndex },
-            set: { animationState.currentIndex = $0 }
+            set: { newValue in
+                // Prevent TabView from applying a stale page-change event from
+                // the same drag that just committed swipe-to-trash.
+                guard !isTabSelectionLocked else { return }
+                animationState.currentIndex = newValue
+            }
         )
     }
 
@@ -202,6 +208,7 @@ struct MediaViewerView: View {
         .swipeToTrash(
             isEnabled: !isTrashed,
             onDragStart: {
+                isTabSelectionLocked = true
                 // Show preview of next photo underneath
                 if let next = nextAsset {
                     animationState.startAnimation(nextAssetID: next.id)
@@ -212,6 +219,7 @@ struct MediaViewerView: View {
             },
             onDragCancel: {
                 animationState.cancelAnimation()
+                isTabSelectionLocked = false
             },
             onTrash: {
                 trashItem(at: index)
@@ -441,6 +449,12 @@ struct MediaViewerView: View {
         } else {
             // No more visible items - reset animation state
             animationState.reset()
+        }
+
+        // Unlock on next runloop to ignore trailing TabView selection updates
+        // emitted by the same swipe gesture.
+        DispatchQueue.main.async {
+            isTabSelectionLocked = false
         }
     }
 
