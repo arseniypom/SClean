@@ -96,6 +96,51 @@ nonisolated struct TypeBucket: Identifiable, Equatable, Sendable {
     var id: String { category.rawValue }
 }
 
+// MARK: - Insight Category
+
+/// Actionable cleanup scenarios for the Insights tab
+nonisolated enum InsightCategory: String, CaseIterable, Identifiable, Sendable {
+    case oldScreenshots = "Old Screenshots"
+    case shortVideos = "Short Videos"
+    case oldScreenRecordings = "Old Screen Recordings"
+    case agedLivePhotos = "Aged Live Photos"
+
+    nonisolated var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .oldScreenshots: return "rectangle.dashed"
+        case .shortVideos: return "video.badge.clock"
+        case .oldScreenRecordings: return "record.circle"
+        case .agedLivePhotos: return "livephoto"
+        }
+    }
+
+    var ruleDescription: String {
+        switch self {
+        case .oldScreenshots:
+            return "Screenshots older than 45 days"
+        case .shortVideos:
+            return "Videos up to 10s, older than 14 days"
+        case .oldScreenRecordings:
+            return "Screen recordings older than 21 days"
+        case .agedLivePhotos:
+            return "Live Photos older than 180 days"
+        }
+    }
+}
+
+// MARK: - Insight Bucket
+
+/// Aggregated cleanup recommendation for UI
+nonisolated struct InsightBucket: Identifiable, Equatable, Sendable {
+    let category: InsightCategory
+    let count: Int
+    let totalBytes: Int64
+
+    var id: String { category.rawValue }
+}
+
 // MARK: - Library Index Snapshot
 
 nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
@@ -217,12 +262,96 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
         ]
     }
 
+    /// Aggregated insight buckets for UI
+    var insightBuckets: [InsightBucket] {
+        insightBuckets(referenceDate: Date())
+    }
+
+    /// Aggregated insight buckets using an injected reference date (test-friendly)
+    func insightBuckets(referenceDate: Date) -> [InsightBucket] {
+        guard !assets.isEmpty else { return [] }
+
+        let cutoffOldScreenshots = Calendar.current.date(byAdding: .day, value: -45, to: referenceDate) ?? .distantPast
+        let cutoffShortVideos = Calendar.current.date(byAdding: .day, value: -14, to: referenceDate) ?? .distantPast
+        let cutoffOldScreenRecordings = Calendar.current.date(byAdding: .day, value: -21, to: referenceDate) ?? .distantPast
+        let cutoffAgedLivePhotos = Calendar.current.date(byAdding: .day, value: -180, to: referenceDate) ?? .distantPast
+
+        var oldScreenshotsCount = 0, oldScreenshotsBytes: Int64 = 0
+        var shortVideosCount = 0, shortVideosBytes: Int64 = 0
+        var oldScreenRecordingsCount = 0, oldScreenRecordingsBytes: Int64 = 0
+        var agedLivePhotosCount = 0, agedLivePhotosBytes: Int64 = 0
+
+        for asset in assets {
+            let isScreenshot = (asset.mediaSubtypes & Self.screenshotMask) != 0
+            let isLivePhoto = (asset.mediaSubtypes & Self.photoLiveMask) != 0
+            let isScreenRecording = (asset.mediaSubtypes & Self.screenRecordingMask) != 0
+            let assetDate = asset.lastKnownChangeDate
+
+            if asset.mediaType == 1, isScreenshot, assetDate < cutoffOldScreenshots {
+                oldScreenshotsCount += 1
+                oldScreenshotsBytes += asset.byteSize
+            }
+
+            if asset.mediaType == 2, isScreenRecording, assetDate < cutoffOldScreenRecordings {
+                oldScreenRecordingsCount += 1
+                oldScreenRecordingsBytes += asset.byteSize
+            }
+
+            if asset.mediaType == 2,
+               !isScreenRecording,
+               asset.duration > 0,
+               asset.duration <= 10,
+               assetDate < cutoffShortVideos {
+                shortVideosCount += 1
+                shortVideosBytes += asset.byteSize
+            }
+
+            if asset.mediaType == 1, isLivePhoto, assetDate < cutoffAgedLivePhotos {
+                agedLivePhotosCount += 1
+                agedLivePhotosBytes += asset.byteSize
+            }
+        }
+
+        var buckets: [InsightBucket] = []
+        if oldScreenshotsCount >= 12 {
+            buckets.append(InsightBucket(
+                category: .oldScreenshots,
+                count: oldScreenshotsCount,
+                totalBytes: oldScreenshotsBytes
+            ))
+        }
+        if shortVideosCount >= 8 {
+            buckets.append(InsightBucket(
+                category: .shortVideos,
+                count: shortVideosCount,
+                totalBytes: shortVideosBytes
+            ))
+        }
+        if oldScreenRecordingsCount >= 3 {
+            buckets.append(InsightBucket(
+                category: .oldScreenRecordings,
+                count: oldScreenRecordingsCount,
+                totalBytes: oldScreenRecordingsBytes
+            ))
+        }
+        if agedLivePhotosCount >= 8 {
+            buckets.append(InsightBucket(
+                category: .agedLivePhotos,
+                count: agedLivePhotosCount,
+                totalBytes: agedLivePhotosBytes
+            ))
+        }
+
+        return buckets.sorted { lhs, rhs in
+            if lhs.totalBytes == rhs.totalBytes {
+                return lhs.count > rhs.count
+            }
+            return lhs.totalBytes > rhs.totalBytes
+        }
+    }
+
     /// Get assets filtered by type category
     func assets(for category: TypeCategory) -> [IndexedAsset] {
-        let photoLiveMask = 0x8
-        let screenshotMask = 0x4
-        let screenRecordingMask = 0x80000  // Undocumented but reliable
-
         switch category {
         case .videos:
             return assets.filter { $0.mediaType == 2 }
@@ -237,16 +366,16 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
         case .photos:
             return assets.filter {
                 $0.mediaType == 1 &&
-                ($0.mediaSubtypes & photoLiveMask) == 0 &&
-                ($0.mediaSubtypes & screenshotMask) == 0
+                ($0.mediaSubtypes & Self.photoLiveMask) == 0 &&
+                ($0.mediaSubtypes & Self.screenshotMask) == 0
             }
             .sorted { $0.lastKnownChangeDate > $1.lastKnownChangeDate }
 
         case .largestPhotos:
             return assets.filter {
                 $0.mediaType == 1 &&
-                ($0.mediaSubtypes & photoLiveMask) == 0 &&
-                ($0.mediaSubtypes & screenshotMask) == 0
+                ($0.mediaSubtypes & Self.photoLiveMask) == 0 &&
+                ($0.mediaSubtypes & Self.screenshotMask) == 0
             }
             .sorted { $0.byteSize > $1.byteSize }
             .prefix(50)
@@ -254,23 +383,71 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
 
         case .livePhotos:
             return assets.filter {
-                $0.mediaType == 1 && ($0.mediaSubtypes & photoLiveMask) != 0
+                $0.mediaType == 1 && ($0.mediaSubtypes & Self.photoLiveMask) != 0
             }
             .sorted { $0.lastKnownChangeDate > $1.lastKnownChangeDate }
 
         case .screenshots:
             return assets.filter {
-                $0.mediaType == 1 && ($0.mediaSubtypes & screenshotMask) != 0
+                $0.mediaType == 1 && ($0.mediaSubtypes & Self.screenshotMask) != 0
             }
             .sorted { $0.lastKnownChangeDate > $1.lastKnownChangeDate }
 
         case .screenRecordings:
             return assets.filter {
-                $0.mediaType == 2 && ($0.mediaSubtypes & screenRecordingMask) != 0
+                $0.mediaType == 2 && ($0.mediaSubtypes & Self.screenRecordingMask) != 0
             }
             .sorted { $0.lastKnownChangeDate > $1.lastKnownChangeDate }
         }
     }
+
+    /// Get assets filtered by insight category
+    func assets(for category: InsightCategory, referenceDate: Date = Date()) -> [IndexedAsset] {
+        let cutoffOldScreenshots = Calendar.current.date(byAdding: .day, value: -45, to: referenceDate) ?? .distantPast
+        let cutoffShortVideos = Calendar.current.date(byAdding: .day, value: -14, to: referenceDate) ?? .distantPast
+        let cutoffOldScreenRecordings = Calendar.current.date(byAdding: .day, value: -21, to: referenceDate) ?? .distantPast
+        let cutoffAgedLivePhotos = Calendar.current.date(byAdding: .day, value: -180, to: referenceDate) ?? .distantPast
+
+        switch category {
+        case .oldScreenshots:
+            return assets.filter {
+                $0.mediaType == 1 &&
+                ($0.mediaSubtypes & Self.screenshotMask) != 0 &&
+                $0.lastKnownChangeDate < cutoffOldScreenshots
+            }
+            .sorted { $0.lastKnownChangeDate < $1.lastKnownChangeDate }
+
+        case .shortVideos:
+            return assets.filter {
+                $0.mediaType == 2 &&
+                ($0.mediaSubtypes & Self.screenRecordingMask) == 0 &&
+                $0.duration > 0 &&
+                $0.duration <= 10 &&
+                $0.lastKnownChangeDate < cutoffShortVideos
+            }
+            .sorted { $0.lastKnownChangeDate < $1.lastKnownChangeDate }
+
+        case .oldScreenRecordings:
+            return assets.filter {
+                $0.mediaType == 2 &&
+                ($0.mediaSubtypes & Self.screenRecordingMask) != 0 &&
+                $0.lastKnownChangeDate < cutoffOldScreenRecordings
+            }
+            .sorted { $0.lastKnownChangeDate < $1.lastKnownChangeDate }
+
+        case .agedLivePhotos:
+            return assets.filter {
+                $0.mediaType == 1 &&
+                ($0.mediaSubtypes & Self.photoLiveMask) != 0 &&
+                $0.lastKnownChangeDate < cutoffAgedLivePhotos
+            }
+            .sorted { $0.lastKnownChangeDate < $1.lastKnownChangeDate }
+        }
+    }
+
+    private static let photoLiveMask = 0x8
+    private static let screenshotMask = 0x4
+    private static let screenRecordingMask = 0x80000
 }
 
 // MARK: - Disk Store

@@ -13,6 +13,7 @@ private enum HomeTab: String, CaseIterable {
     case years
     case months
     case types
+    case insights
 }
 
 struct HomeView: View {
@@ -26,6 +27,7 @@ struct HomeView: View {
     @State private var cachedYears: [YearBucket] = []
     @State private var cachedMonths: [MonthBucket] = []
     @State private var cachedTypes: [TypeBucket] = []
+    @State private var cachedInsights: [InsightBucket] = []
     
     var body: some View {
         NavigationStack {
@@ -66,11 +68,13 @@ struct HomeView: View {
                     cachedYears = years
                     cachedMonths = libraryService.monthBuckets
                     cachedTypes = libraryService.typeBuckets
+                    cachedInsights = libraryService.insightBuckets
                 }
                 if case .empty = newValue {
                     cachedYears = []
                     cachedMonths = []
                     cachedTypes = []
+                    cachedInsights = []
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
@@ -122,6 +126,7 @@ struct HomeView: View {
     private func yearsList(_ years: [YearBucket]) -> some View {
         let months = cachedMonths.isEmpty ? libraryService.monthBuckets : cachedMonths
         let types = cachedTypes.isEmpty ? libraryService.typeBuckets : cachedTypes
+        let insights = cachedInsights.isEmpty ? libraryService.insightBuckets : cachedInsights
 
         return ScrollView {
             LazyVStack(spacing: Spacing.sm) {
@@ -165,6 +170,13 @@ struct HomeView: View {
                         selectedTab = .types
                     }
 
+                    TabHeaderButton(
+                        title: "Insights",
+                        isSelected: selectedTab == .insights
+                    ) {
+                        selectedTab = .insights
+                    }
+
                     Spacer()
                 }
                 .padding(.horizontal, Spacing.md)
@@ -202,7 +214,7 @@ struct HomeView: View {
                         .accessibilityIdentifier("monthCard_\(bucket.id)")
                         .padding(.horizontal, Spacing.md)
                     }
-                } else {
+                } else if selectedTab == .types {
                     // Type cards
                     ForEach(types) { bucket in
                         NavigationLink {
@@ -217,6 +229,26 @@ struct HomeView: View {
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("typeCard_\(bucket.id)")
                         .padding(.horizontal, Spacing.md)
+                    }
+                } else {
+                    if insights.isEmpty {
+                        InsightEmptyCard()
+                            .padding(.horizontal, Spacing.md)
+                    } else {
+                        ForEach(insights) { bucket in
+                            NavigationLink {
+                                InsightGridView(
+                                    bucket: bucket,
+                                    snapshot: libraryService.currentSnapshot,
+                                    permissionService: permissionService
+                                )
+                            } label: {
+                                InsightCardContent(bucket: bucket)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("insightCard_\(bucket.id)")
+                            .padding(.horizontal, Spacing.md)
+                        }
                     }
                 }
 
@@ -259,6 +291,23 @@ struct HomeView: View {
         Task {
             await libraryService.fetchYears()
         }
+    }
+}
+
+private struct InsightEmptyCard: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text("No quick cleanups right now")
+                .font(Typography.title3)
+                .foregroundStyle(Color.scTextPrimary)
+
+            Text("Insights will appear when SClean finds safe batch cleanup opportunities.")
+                .font(Typography.subheadline)
+                .foregroundStyle(Color.scTextSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Spacing.md)
+        .scCardStyle()
     }
 }
 

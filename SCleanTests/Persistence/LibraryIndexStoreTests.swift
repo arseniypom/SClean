@@ -170,4 +170,129 @@ struct LibraryIndexStoreTests {
 
         #expect(decoded == original)
     }
+
+    // MARK: - Insights Tests
+
+    @Test func snapshot_insightBuckets_buildsAndSortsBySavings() {
+        let referenceDate = Date(timeIntervalSince1970: 1_767_225_600) // January 1, 2026
+        let oldDate = Date(timeIntervalSince1970: 1_746_576_000) // May 8, 2025
+
+        var assets: [IndexedAsset] = []
+
+        // 12 old screenshots
+        for index in 0..<12 {
+            assets.append(
+                TestFactory.indexedAsset(
+                    id: "screenshot-\(index)",
+                    byteSize: 5 * TestBytes.oneMB,
+                    lastKnownChangeDate: oldDate,
+                    mediaType: 1,
+                    mediaSubtypes: 0x4
+                )
+            )
+        }
+
+        // 8 short videos
+        for index in 0..<8 {
+            assets.append(
+                TestFactory.indexedAsset(
+                    id: "short-video-\(index)",
+                    byteSize: 20 * TestBytes.oneMB,
+                    lastKnownChangeDate: oldDate,
+                    mediaType: 2,
+                    duration: 8
+                )
+            )
+        }
+
+        // 3 old screen recordings
+        for index in 0..<3 {
+            assets.append(
+                TestFactory.indexedAsset(
+                    id: "screen-recording-\(index)",
+                    byteSize: 100 * TestBytes.oneMB,
+                    lastKnownChangeDate: oldDate,
+                    mediaType: 2,
+                    mediaSubtypes: 0x80000,
+                    duration: 30
+                )
+            )
+        }
+
+        // 8 aged live photos
+        for index in 0..<8 {
+            assets.append(
+                TestFactory.indexedAsset(
+                    id: "live-photo-\(index)",
+                    byteSize: 6 * TestBytes.oneMB,
+                    lastKnownChangeDate: oldDate,
+                    mediaType: 1,
+                    mediaSubtypes: 0x8
+                )
+            )
+        }
+
+        let snapshot = TestFactory.librarySnapshot(assets: assets)
+        let buckets = snapshot.insightBuckets(referenceDate: referenceDate)
+
+        #expect(buckets.count == 4)
+        #expect(buckets[0].category == .oldScreenRecordings)
+        #expect(buckets[1].category == .shortVideos)
+        #expect(buckets[2].category == .oldScreenshots)
+        #expect(buckets[3].category == .agedLivePhotos)
+    }
+
+    @Test func snapshot_insightBuckets_skipsNonActionableSmallGroups() {
+        let referenceDate = Date(timeIntervalSince1970: 1_767_225_600) // January 1, 2026
+        let oldDate = Date(timeIntervalSince1970: 1_746_576_000) // May 8, 2025
+
+        let assets = [
+            TestFactory.indexedAsset(id: "s1", lastKnownChangeDate: oldDate, mediaType: 1, mediaSubtypes: 0x4),
+            TestFactory.indexedAsset(id: "s2", lastKnownChangeDate: oldDate, mediaType: 1, mediaSubtypes: 0x4),
+            TestFactory.indexedAsset(id: "v1", lastKnownChangeDate: oldDate, mediaType: 2, duration: 8),
+            TestFactory.indexedAsset(id: "v2", lastKnownChangeDate: oldDate, mediaType: 2, duration: 7),
+            TestFactory.indexedAsset(id: "r1", lastKnownChangeDate: oldDate, mediaType: 2, mediaSubtypes: 0x80000)
+        ]
+
+        let snapshot = TestFactory.librarySnapshot(assets: assets)
+        let buckets = snapshot.insightBuckets(referenceDate: referenceDate)
+
+        #expect(buckets.isEmpty)
+    }
+
+    @Test func snapshot_assetsForShortVideos_appliesAgeDurationAndSubtypeFilters() {
+        let referenceDate = Date(timeIntervalSince1970: 1_767_225_600) // January 1, 2026
+        let oldDate = Date(timeIntervalSince1970: 1_746_576_000) // May 8, 2025
+        let recentDate = Date(timeIntervalSince1970: 1_766_880_000) // December 28, 2025
+
+        let assets = [
+            TestFactory.indexedAsset(id: "keep-oldest", lastKnownChangeDate: oldDate, mediaType: 2, duration: 4),
+            TestFactory.indexedAsset(id: "keep-newer", lastKnownChangeDate: oldDate.addingTimeInterval(3_600), mediaType: 2, duration: 9),
+            TestFactory.indexedAsset(id: "skip-too-long", lastKnownChangeDate: oldDate, mediaType: 2, duration: 25),
+            TestFactory.indexedAsset(id: "skip-recent", lastKnownChangeDate: recentDate, mediaType: 2, duration: 6),
+            TestFactory.indexedAsset(id: "skip-screen-recording", lastKnownChangeDate: oldDate, mediaType: 2, mediaSubtypes: 0x80000, duration: 5)
+        ]
+
+        let snapshot = TestFactory.librarySnapshot(assets: assets)
+        let filtered = snapshot.assets(for: .shortVideos, referenceDate: referenceDate)
+
+        #expect(filtered.map(\.id) == ["keep-oldest", "keep-newer"])
+    }
+
+    @Test func snapshot_assetsForOldScreenshots_appliesAgeCutoff() {
+        let referenceDate = Date(timeIntervalSince1970: 1_767_225_600) // January 1, 2026
+        let oldDate = Date(timeIntervalSince1970: 1_746_576_000) // May 8, 2025
+        let recentDate = Date(timeIntervalSince1970: 1_766_966_400) // December 29, 2025
+
+        let assets = [
+            TestFactory.indexedAsset(id: "old-shot", lastKnownChangeDate: oldDate, mediaType: 1, mediaSubtypes: 0x4),
+            TestFactory.indexedAsset(id: "recent-shot", lastKnownChangeDate: recentDate, mediaType: 1, mediaSubtypes: 0x4),
+            TestFactory.indexedAsset(id: "old-non-shot", lastKnownChangeDate: oldDate, mediaType: 1, mediaSubtypes: 0)
+        ]
+
+        let snapshot = TestFactory.librarySnapshot(assets: assets)
+        let filtered = snapshot.assets(for: .oldScreenshots, referenceDate: referenceDate)
+
+        #expect(filtered.map(\.id) == ["old-shot"])
+    }
 }

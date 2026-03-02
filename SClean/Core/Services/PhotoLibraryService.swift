@@ -61,6 +61,9 @@ final class PhotoLibraryService: ObservableObject {
     /// Current type buckets derived from the latest snapshot
     private(set) var typeBuckets: [TypeBucket] = []
 
+    /// Current insight buckets derived from the latest snapshot
+    private(set) var insightBuckets: [InsightBucket] = []
+
     /// Current snapshot for type-filtered asset lookups
     private(set) var currentSnapshot: LibraryIndexSnapshot?
 
@@ -88,6 +91,7 @@ final class PhotoLibraryService: ObservableObject {
             state = .loaded(cachedSnapshot.yearBuckets)
             monthBuckets = cachedSnapshot.monthBuckets
             typeBuckets = cachedSnapshot.typeBuckets
+            insightBuckets = cachedSnapshot.insightBuckets
             currentSnapshot = cachedSnapshot
         } else {
             state = .loading
@@ -119,12 +123,14 @@ final class PhotoLibraryService: ObservableObject {
         currentSnapshot = snapshot
         monthBuckets = snapshot.monthBuckets
         typeBuckets = snapshot.typeBuckets
+        insightBuckets = snapshot.insightBuckets
 
         let buckets = snapshot.yearBuckets
         if buckets.isEmpty {
             state = .empty
             monthBuckets = []
             typeBuckets = []
+            insightBuckets = []
             currentSnapshot = nil
         } else {
             state = .loaded(buckets)
