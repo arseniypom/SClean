@@ -61,7 +61,7 @@ nonisolated struct MonthBucket: Identifiable, Equatable, Sendable {
 // MARK: - Type Category
 
 /// Media type categories for the Types tab
-enum TypeCategory: String, CaseIterable, Identifiable, Sendable {
+nonisolated enum TypeCategory: String, CaseIterable, Identifiable, Sendable {
     case largestVideos = "Largest Videos"
     case largestPhotos = "Largest Photos"
     case screenshots = "Screenshots"
@@ -70,7 +70,7 @@ enum TypeCategory: String, CaseIterable, Identifiable, Sendable {
     case photos = "Photos"
     case livePhotos = "Live Photos"
 
-    var id: String { rawValue }
+    nonisolated var id: String { rawValue }
 
     var icon: String {
         switch self {
@@ -93,7 +93,7 @@ nonisolated struct TypeBucket: Identifiable, Equatable, Sendable {
     let count: Int
     let totalBytes: Int64
 
-    var id: String { category.id }
+    var id: String { category.rawValue }
 }
 
 // MARK: - Library Index Snapshot

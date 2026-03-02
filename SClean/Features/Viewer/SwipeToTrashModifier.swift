@@ -19,6 +19,8 @@ struct SwipeToTrashModifier: ViewModifier {
     @State private var dragOffset: CGFloat = 0
     @State private var isDragging = false
     @State private var hasNotifiedStart = false
+    @State private var isCommitting = false
+    @State private var commitTask: Task<Void, Never>?
 
     /// Threshold distance to commit trash action
     private let trashThreshold: CGFloat = 90
@@ -26,23 +28,34 @@ struct SwipeToTrashModifier: ViewModifier {
     /// Maximum visual offset
     private let maxOffset: CGFloat = 200
 
+    /// Fly-away animation timing tuned for a smooth, premium feel
+    private let commitDuration: Double = 0.28
+
     /// Progress toward trash (0 to 1)
     private var trashProgress: CGFloat {
         min(1.0, abs(dragOffset) / trashThreshold)
     }
 
     func body(content: Content) -> some View {
-        ZStack {
-            content
-                .offset(y: dragOffset)
+        GeometryReader { proxy in
+            ZStack {
+                content
+                    .offset(y: dragOffset)
+                    .scaleEffect(CGFloat(1) - (trashProgress * 0.015))
+                    .opacity(Double(1) - (Double(trashProgress) * 0.08))
 
-            // Trash indicator overlay
-            if isDragging && abs(dragOffset) > 24 {
-                trashIndicator
-                    .opacity(Double(trashProgress))
+                // Trash indicator overlay
+                if isDragging && abs(dragOffset) > 24 {
+                    trashIndicator
+                        .opacity(Double(trashProgress))
+                }
+            }
+            .simultaneousGesture(isEnabled && !isCommitting ? trashGesture(containerHeight: proxy.size.height) : nil)
+            .onDisappear {
+                commitTask?.cancel()
+                commitTask = nil
             }
         }
-        .simultaneousGesture(isEnabled ? trashGesture : nil)
     }
 
     // MARK: - Trash Indicator
@@ -53,7 +66,7 @@ struct SwipeToTrashModifier: ViewModifier {
                 Circle()
                     .fill(.white.opacity(0.15))
                     .frame(width: 72, height: 72)
-                    .scaleEffect(0.8 + (trashProgress * 0.2))
+                    .scaleEffect(CGFloat(0.8) + (trashProgress * 0.2))
 
                 Image(systemName: trashProgress >= 1.0 ? "trash.fill" : "trash")
                     .font(.system(size: 28, weight: .medium))
@@ -70,9 +83,11 @@ struct SwipeToTrashModifier: ViewModifier {
 
     // MARK: - Gesture
 
-    private var trashGesture: some Gesture {
+    private func trashGesture(containerHeight: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 16)
             .onChanged { value in
+                guard !isCommitting else { return }
+
                 // Only respond primarily to upward drags; allow small horizontal drift
                 let dy = value.translation.height
                 let dx = abs(value.translation.width)
@@ -83,8 +98,10 @@ struct SwipeToTrashModifier: ViewModifier {
                         onDragCancel?()
                         hasNotifiedStart = false
                     }
-                    dragOffset = 0
-                    isDragging = false
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                        dragOffset = 0
+                        isDragging = false
+                    }
                     return
                 }
 
@@ -112,6 +129,7 @@ struct SwipeToTrashModifier: ViewModifier {
                 onDragProgress?(trashProgress)
             }
             .onEnded { _ in
+                guard !isCommitting else { return }
                 let shouldTrash = abs(dragOffset) >= trashThreshold
 
                 if shouldTrash {
@@ -119,11 +137,40 @@ struct SwipeToTrashModifier: ViewModifier {
                     let impact = UIImpactFeedbackGenerator(style: .medium)
                     impact.impactOccurred()
 
-                    // Immediately trash - no animation delay
-                    onTrash()
+                    // Complete with a smooth fly-away before committing the state change
+                    isCommitting = true
+                    onDragProgress?(1.0)
+                    isDragging = false
+
+                    let flyOutOffset = -max(maxOffset, containerHeight + 80)
+                    withAnimation(.timingCurve(0.22, 0.95, 0.30, 1.0, duration: commitDuration)) {
+                        dragOffset = flyOutOffset
+                    }
+
+                    commitTask?.cancel()
+                    commitTask = Task {
+                        try? await Task.sleep(nanoseconds: UInt64(commitDuration * 1_000_000_000))
+                        guard !Task.isCancelled else { return }
+
+                        await MainActor.run {
+                            onTrash()
+                            dragOffset = 0
+                            isDragging = false
+                            hasNotifiedStart = false
+                            isCommitting = false
+                            commitTask = nil
+                        }
+                    }
+                    return
                 } else if hasNotifiedStart {
                     // Cancelled - notify parent to hide preview
                     onDragCancel?()
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                        dragOffset = 0
+                        isDragging = false
+                    }
+                    hasNotifiedStart = false
+                    return
                 }
 
                 // Reset state

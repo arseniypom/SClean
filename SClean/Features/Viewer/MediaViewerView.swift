@@ -171,6 +171,7 @@ struct MediaViewerView: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            .zIndex(1)
         }
         .ignoresSafeArea()
         .contentShape(Rectangle())
@@ -186,11 +187,19 @@ struct MediaViewerView: View {
         if animationState.isAnimating,
            let previewID = animationState.previewAssetID,
            let previewAsset = assets.first(where: { $0.id == previewID }) {
+            let progress = max(CGFloat.zero, min(1, animationState.dragProgress))
+
             MediaPageView(
                 asset: previewAsset,
                 isCurrentPage: false,
                 isTrashed: false
             )
+            .scaleEffect(0.965 + (0.035 * progress))
+            .offset(y: 20 - (20 * progress))
+            .opacity(0.72 + (0.28 * Double(progress)))
+            .saturation(0.92 + (0.08 * Double(progress)))
+            .allowsHitTesting(false)
+            .zIndex(0)
         }
     }
 
