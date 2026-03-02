@@ -21,6 +21,10 @@ struct MediaViewerView: View {
     @State private var toast: ToastData?
     @State private var showOnboarding: Bool
     @State private var currentAssetSize: Int64?
+    @State private var currentPageGlobalFrame: CGRect = .zero
+    @State private var previewPageGlobalFrame: CGRect = .zero
+    @State private var lastLoggedCurrentPageFrame: CGRect = .zero
+    @State private var lastLoggedPreviewFrame: CGRect = .zero
     @Environment(\.dismiss) private var dismiss
 
     /// Number of items to prefetch in each direction
@@ -122,14 +126,26 @@ struct MediaViewerView: View {
         }
         .statusBarHidden(false)
         .onAppear {
+            swipeDebugLog("onAppear startIndex=\(startIndex) currentIndex=\(animationState.currentIndex) assets=\(assets.count)")
             prefetchAdjacent()
             fetchCurrentAssetSize()
         }
-        .onChange(of: animationState.currentIndex) { _, _ in
+        .onChange(of: animationState.currentIndex) { oldIndex, newIndex in
+            swipeDebugLog("currentIndex changed \(oldIndex) -> \(newIndex) isAnimating=\(animationState.isAnimating) previewID=\(animationState.previewAssetID ?? "nil")")
+            logFrameDelta(context: "onChange(currentIndex)")
+
             prefetchAdjacent()
             fetchCurrentAssetSize()
+
+            DispatchQueue.main.async {
+                logFrameDelta(context: "onChange(currentIndex) + nextRunLoop")
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                logFrameDelta(context: "onChange(currentIndex) + 120ms")
+            }
         }
         .onDisappear {
+            swipeDebugLog("onDisappear currentIndex=\(animationState.currentIndex)")
             cancelAllPrefetch()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
@@ -150,7 +166,11 @@ struct MediaViewerView: View {
             set: { newValue in
                 // Prevent TabView from applying a stale page-change event from
                 // the same drag that just committed swipe-to-trash.
-                guard !isTabSelectionLocked else { return }
+                guard !isTabSelectionLocked else {
+                    swipeDebugLog("TabView selection ignored due to lock: current=\(animationState.currentIndex) requested=\(newValue)")
+                    return
+                }
+                swipeDebugLog("TabView selection set: \(animationState.currentIndex) -> \(newValue)")
                 animationState.currentIndex = newValue
             }
         )
@@ -159,9 +179,6 @@ struct MediaViewerView: View {
     private var pagingContent: some View {
         ZStack {
             Color.black
-
-            // Preview layer - next photo visible underneath during swipe
-            previewLayer
 
             // Main TabView
             TabView(selection: currentIndexBinding) {
@@ -180,60 +197,94 @@ struct MediaViewerView: View {
         }
     }
 
-    // MARK: - Preview Layer (Deck Effect)
-
-    @ViewBuilder
-    private var previewLayer: some View {
-        if animationState.isAnimating,
-           let previewID = animationState.previewAssetID,
-           let previewAsset = assets.first(where: { $0.id == previewID }) {
-            let progress = max(CGFloat.zero, min(1, animationState.dragProgress))
-
-            MediaPageView(
-                asset: previewAsset,
-                isCurrentPage: false,
-                isTrashed: false
-            )
-            .scaleEffect(0.965 + (0.035 * progress))
-            .offset(y: 20 - (20 * progress))
-            .opacity(0.72 + (0.28 * Double(progress)))
-            .saturation(0.92 + (0.08 * Double(progress)))
-            .allowsHitTesting(false)
-            .zIndex(0)
-        }
-    }
-
     private func pageView(for index: Int, asset: YearAsset) -> some View {
         let isTrashed = trashService.isTrashed(asset.id)
         let nextAsset = findNextVisibleAsset(from: index)
+        let showInlinePreview =
+            index == currentIndex &&
+            animationState.isAnimating &&
+            animationState.previewAssetID == nextAsset?.id
 
-        return MediaPageView(
-            asset: asset,
-            isCurrentPage: index == currentIndex,
-            isTrashed: isTrashed
-        ) {
-            trashService.restore(asset.id)
-        }
-        .swipeToTrash(
-            isEnabled: !isTrashed,
-            onDragStart: {
-                isTabSelectionLocked = true
-                // Show preview of next photo underneath
-                if let next = nextAsset {
-                    animationState.startAnimation(nextAssetID: next.id)
+        return ZStack {
+            if showInlinePreview, let nextAsset {
+                MediaPageView(
+                    asset: nextAsset,
+                    isCurrentPage: false,
+                    isTrashed: false
+                )
+                .allowsHitTesting(false)
+                .zIndex(0)
+                .background {
+                    GeometryReader { proxy in
+                        let frame = proxy.frame(in: .global)
+                        Color.clear
+                            .onAppear {
+                                updatePreviewFrame(frame, reason: "inline preview appear id=\(nextAsset.id)")
+                            }
+                            .onChange(of: frame) { _, newFrame in
+                                updatePreviewFrame(newFrame, reason: "inline preview frame changed id=\(nextAsset.id)")
+                            }
+                    }
                 }
-            },
-            onDragProgress: { progress in
-                animationState.updateDragProgress(progress)
-            },
-            onDragCancel: {
-                animationState.cancelAnimation()
-                isTabSelectionLocked = false
-            },
-            onTrash: {
-                trashItem(at: index)
+                .onDisappear {
+                    swipeDebugLog("inline preview disappear id=\(nextAsset.id) lastPreviewFrame=\(frameString(previewPageGlobalFrame))")
+                    previewPageGlobalFrame = .zero
+                }
             }
-        )
+
+            MediaPageView(
+                asset: asset,
+                isCurrentPage: index == currentIndex,
+                isTrashed: isTrashed
+            ) {
+                trashService.restore(asset.id)
+            }
+            .zIndex(1)
+            .swipeToTrash(
+                isEnabled: !isTrashed,
+                onDragStart: {
+                    isTabSelectionLocked = true
+                    swipeDebugLog("dragStart index=\(index) asset=\(asset.id) nextAsset=\(nextAsset?.id ?? "nil") currentFrame=\(frameString(currentPageGlobalFrame))")
+                    // Show preview of next photo underneath
+                    if let next = nextAsset {
+                        animationState.startAnimation(nextAssetID: next.id)
+                    }
+                },
+                onDragProgress: { progress in
+                    animationState.updateDragProgress(progress)
+                },
+                onDragCancel: {
+                    swipeDebugLog("dragCancel index=\(index) asset=\(asset.id) currentFrame=\(frameString(currentPageGlobalFrame)) previewFrame=\(frameString(previewPageGlobalFrame))")
+                    animationState.cancelAnimation()
+                    isTabSelectionLocked = false
+                },
+                onTrash: {
+                    swipeDebugLog("onTrash callback index=\(index) asset=\(asset.id) currentFrame=\(frameString(currentPageGlobalFrame)) previewFrame=\(frameString(previewPageGlobalFrame))")
+                    trashItem(at: index)
+                }
+            )
+        }
+        .background {
+            GeometryReader { proxy in
+                let frame = proxy.frame(in: .global)
+                Color.clear
+                    .onAppear {
+                        if index == currentIndex {
+                            updateCurrentPageFrame(frame, reason: "current page appear index=\(index) asset=\(asset.id)")
+                        }
+                    }
+                    .onChange(of: frame) { _, newFrame in
+                        if index == currentIndex {
+                            updateCurrentPageFrame(newFrame, reason: "current page frame changed index=\(index) asset=\(asset.id)")
+                        }
+                    }
+                    .onChange(of: currentIndex) { _, newCurrentIndex in
+                        if index == newCurrentIndex {
+                            updateCurrentPageFrame(frame, reason: "page became current index=\(index) asset=\(asset.id)")
+                        }
+                    }
+            }
+        }
         .accessibilityIdentifier(index == currentIndex ? "currentPhotoView" : "photoView_\(index)")
     }
 
@@ -443,6 +494,8 @@ struct MediaViewerView: View {
 
         // Find next visible BEFORE trashing (while current item is still "visible")
         let nextIndex = nextVisibleIndex(from: index)
+        swipeDebugLog("trashItem start index=\(index) asset=\(assetID) nextIndex=\(nextIndex.map(String.init) ?? "nil")")
+        logFrameDelta(context: "trashItem(before trash)")
 
         // Trash the item
         trashService.trash(assetID)
@@ -454,10 +507,20 @@ struct MediaViewerView: View {
 
         // Advance to next visible using animation state
         if let nextIndex {
+            swipeDebugLog("completeAnimation(nextIndex: \(nextIndex))")
             animationState.completeAnimation(nextIndex: nextIndex)
         } else {
             // No more visible items - reset animation state
+            swipeDebugLog("animationState.reset() (no next visible asset)")
             animationState.reset()
+        }
+
+        logFrameDelta(context: "trashItem(after complete/reset)")
+        DispatchQueue.main.async {
+            logFrameDelta(context: "trashItem + nextRunLoop")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            logFrameDelta(context: "trashItem + 120ms")
         }
 
         // Unlock on next runloop to ignore trailing TabView selection updates
@@ -548,6 +611,55 @@ struct MediaViewerView: View {
             task.cancel()
         }
         prefetchTasks.removeAll()
+    }
+
+    // MARK: - Swipe Debug Logging
+
+    private func swipeDebugLog(_ message: String) {
+#if DEBUG
+        print("[SwipeDebug][MediaViewer] \(message)")
+#endif
+    }
+
+    private func frameString(_ frame: CGRect) -> String {
+        guard frame != .zero else { return "zero" }
+        return String(
+            format: "x=%.1f y=%.1f w=%.1f h=%.1f midY=%.1f",
+            frame.minX, frame.minY, frame.width, frame.height, frame.midY
+        )
+    }
+
+    private func shouldLogFrameChange(from oldFrame: CGRect, to newFrame: CGRect) -> Bool {
+        guard oldFrame != .zero else { return true }
+        return abs(oldFrame.minY - newFrame.minY) > 0.5 ||
+            abs(oldFrame.midY - newFrame.midY) > 0.5 ||
+            abs(oldFrame.height - newFrame.height) > 0.5
+    }
+
+    private func updateCurrentPageFrame(_ frame: CGRect, reason: String) {
+        currentPageGlobalFrame = frame
+        guard shouldLogFrameChange(from: lastLoggedCurrentPageFrame, to: frame) else { return }
+        lastLoggedCurrentPageFrame = frame
+        swipeDebugLog("CURRENT frame \(reason): \(frameString(frame))")
+    }
+
+    private func updatePreviewFrame(_ frame: CGRect, reason: String) {
+        previewPageGlobalFrame = frame
+        guard shouldLogFrameChange(from: lastLoggedPreviewFrame, to: frame) else { return }
+        lastLoggedPreviewFrame = frame
+        swipeDebugLog("PREVIEW frame \(reason): \(frameString(frame))")
+    }
+
+    private func logFrameDelta(context: String) {
+        guard currentPageGlobalFrame != .zero, previewPageGlobalFrame != .zero else {
+            swipeDebugLog("\(context) frame delta unavailable current=\(frameString(currentPageGlobalFrame)) preview=\(frameString(previewPageGlobalFrame))")
+            return
+        }
+        let deltaMinY = currentPageGlobalFrame.minY - previewPageGlobalFrame.minY
+        let deltaMidY = currentPageGlobalFrame.midY - previewPageGlobalFrame.midY
+        swipeDebugLog(
+            "\(context) frameDelta minY=\(String(format: "%.2f", deltaMinY)) midY=\(String(format: "%.2f", deltaMidY)) current=\(frameString(currentPageGlobalFrame)) preview=\(frameString(previewPageGlobalFrame))"
+        )
     }
 }
 

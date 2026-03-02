@@ -8,6 +8,7 @@
 
 import SwiftUI
 import Combine
+import Foundation
 
 /// Manages the animation state for swipe-to-trash transitions.
 ///
@@ -48,6 +49,7 @@ final class SwipeToTrashAnimationState: ObservableObject {
     /// Called when swipe animation starts.
     /// Sets up the preview for the next photo.
     func startAnimation(nextAssetID: String) {
+        debugLog("startAnimation nextAssetID=\(nextAssetID) currentIndex=\(currentIndex)")
         previewAssetID = nextAssetID
         isAnimating = true
 
@@ -71,6 +73,7 @@ final class SwipeToTrashAnimationState: ObservableObject {
     /// Called when drag is cancelled (released before threshold).
     /// Resets animation state without changing index.
     func cancelAnimation() {
+        debugLog("cancelAnimation currentIndex=\(currentIndex) previewAssetID=\(previewAssetID ?? "nil")")
         if recordTransitions {
             transitionLog.append(("cancelAnimation", Date()))
         }
@@ -86,6 +89,7 @@ final class SwipeToTrashAnimationState: ObservableObject {
     /// `currentIndex` changes. This ordering prevents the preview from
     /// briefly showing the wrong photo (which causes visual "shift" artifacts).
     func completeAnimation(nextIndex: Int) {
+        debugLog("completeAnimation nextIndex=\(nextIndex) currentIndex(before)=\(currentIndex) previewAssetID=\(previewAssetID ?? "nil")")
         // Step 1: Hide preview FIRST (instant, no animation)
         if recordTransitions {
             transitionLog.append(("isAnimating=false", Date()))
@@ -103,10 +107,12 @@ final class SwipeToTrashAnimationState: ObservableObject {
             transitionLog.append(("currentIndex=\(nextIndex)", Date()))
         }
         currentIndex = nextIndex
+        debugLog("completeAnimation finished currentIndex(after)=\(currentIndex)")
     }
 
     /// Reset state without changing index (e.g., when all items are trashed)
     func reset() {
+        debugLog("reset currentIndex=\(currentIndex)")
         if recordTransitions {
             transitionLog.append(("reset", Date()))
         }
@@ -118,5 +124,11 @@ final class SwipeToTrashAnimationState: ObservableObject {
     /// Clear transition log (for testing)
     func clearTransitionLog() {
         transitionLog.removeAll()
+    }
+
+    private func debugLog(_ message: String) {
+#if DEBUG
+        print("[SwipeDebug][AnimationState] \(message)")
+#endif
     }
 }

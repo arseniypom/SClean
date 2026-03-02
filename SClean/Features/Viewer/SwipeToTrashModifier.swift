@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Foundation
 
 struct SwipeToTrashModifier: ViewModifier {
     let isEnabled: Bool
@@ -21,6 +22,8 @@ struct SwipeToTrashModifier: ViewModifier {
     @State private var hasNotifiedStart = false
     @State private var isCommitting = false
     @State private var commitTask: Task<Void, Never>?
+    @State private var lastLoggedProgressBucket = -1
+    @State private var dragSessionID = 0
 
     /// Threshold distance to commit trash action
     private let trashThreshold: CGFloat = 90
@@ -52,6 +55,9 @@ struct SwipeToTrashModifier: ViewModifier {
             }
             .simultaneousGesture(isEnabled && !isCommitting ? trashGesture(containerHeight: proxy.size.height) : nil)
             .onDisappear {
+                if isCommitting {
+                    gestureLog("onDisappear while committing, cancelling pending commit task")
+                }
                 commitTask?.cancel()
                 commitTask = nil
             }
@@ -107,6 +113,9 @@ struct SwipeToTrashModifier: ViewModifier {
 
                 // Notify drag start once
                 if !hasNotifiedStart {
+                    dragSessionID = Int(Date().timeIntervalSince1970 * 1000) % 1_000_000
+                    lastLoggedProgressBucket = -1
+                    gestureLog("session=\(dragSessionID) start dy=\(f(dy)) dx=\(f(dx))")
                     onDragStart?()
                     hasNotifiedStart = true
                 }
@@ -127,10 +136,16 @@ struct SwipeToTrashModifier: ViewModifier {
 
                 // Notify progress for deck reveal effect
                 onDragProgress?(trashProgress)
+                let progressBucket = Int((trashProgress * 10).rounded(.down))
+                if progressBucket != lastLoggedProgressBucket {
+                    lastLoggedProgressBucket = progressBucket
+                    gestureLog("session=\(dragSessionID) progress=\(f(trashProgress)) dragOffset=\(f(dragOffset)) dy=\(f(dy))")
+                }
             }
             .onEnded { _ in
                 guard !isCommitting else { return }
                 let shouldTrash = abs(dragOffset) >= trashThreshold
+                gestureLog("session=\(dragSessionID) end shouldTrash=\(shouldTrash) dragOffset=\(f(dragOffset)) threshold=\(f(trashThreshold))")
 
                 if shouldTrash {
                     // Haptic feedback
@@ -143,6 +158,7 @@ struct SwipeToTrashModifier: ViewModifier {
                     isDragging = false
 
                     let flyOutOffset = -max(maxOffset, containerHeight + 80)
+                    gestureLog("session=\(dragSessionID) commit start flyOutOffset=\(f(flyOutOffset)) containerHeight=\(f(containerHeight))")
                     withAnimation(.timingCurve(0.22, 0.95, 0.30, 1.0, duration: commitDuration)) {
                         dragOffset = flyOutOffset
                     }
@@ -153,23 +169,27 @@ struct SwipeToTrashModifier: ViewModifier {
                         guard !Task.isCancelled else { return }
 
                         await MainActor.run {
+                            gestureLog("session=\(dragSessionID) commit finish -> onTrash()")
                             onTrash()
                             dragOffset = 0
                             isDragging = false
                             hasNotifiedStart = false
                             isCommitting = false
+                            lastLoggedProgressBucket = -1
                             commitTask = nil
                         }
                     }
                     return
                 } else if hasNotifiedStart {
                     // Cancelled - notify parent to hide preview
+                    gestureLog("session=\(dragSessionID) cancel")
                     onDragCancel?()
                     withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
                         dragOffset = 0
                         isDragging = false
                     }
                     hasNotifiedStart = false
+                    lastLoggedProgressBucket = -1
                     return
                 }
 
@@ -177,7 +197,18 @@ struct SwipeToTrashModifier: ViewModifier {
                 dragOffset = 0
                 isDragging = false
                 hasNotifiedStart = false
+                lastLoggedProgressBucket = -1
             }
+    }
+
+    private func gestureLog(_ message: String) {
+#if DEBUG
+        print("[SwipeDebug][Gesture] \(message)")
+#endif
+    }
+
+    private func f(_ value: CGFloat) -> String {
+        String(format: "%.2f", Double(value))
     }
 }
 
