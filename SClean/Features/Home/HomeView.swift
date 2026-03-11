@@ -77,6 +77,9 @@ struct HomeView: View {
                     cachedInsights = []
                 }
             }
+            .onChange(of: libraryService.insightBuckets) { _, newValue in
+                cachedInsights = newValue
+            }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
                 permissionService.refreshStatus()
                 if hasAppeared && permissionService.status.canAccessPhotos {

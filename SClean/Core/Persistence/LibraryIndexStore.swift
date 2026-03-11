@@ -14,23 +14,41 @@ nonisolated struct IndexedAsset: Codable, Equatable, Identifiable, Sendable {
     let id: String // PHAsset localIdentifier
     let year: Int
     let byteSize: Int64
+    let creationDate: Date
     let lastKnownChangeDate: Date
 
-    // v2 fields for media type detection
+    // Media metadata used for types + insights
     let mediaType: Int         // PHAssetMediaType.rawValue (1=image, 2=video)
     let mediaSubtypes: Int     // PHAssetMediaSubtype bitmask
     let duration: TimeInterval // For videos, 0 for photos
+    let pixelWidth: Int
+    let pixelHeight: Int
+    let isFavorite: Bool
 
-    /// Backward-compatible initializer for v1 data (defaults for new fields)
-    init(id: String, year: Int, byteSize: Int64, lastKnownChangeDate: Date,
-         mediaType: Int = 0, mediaSubtypes: Int = 0, duration: TimeInterval = 0) {
+    init(
+        id: String,
+        year: Int,
+        byteSize: Int64,
+        creationDate: Date = .distantPast,
+        lastKnownChangeDate: Date,
+        mediaType: Int = 0,
+        mediaSubtypes: Int = 0,
+        duration: TimeInterval = 0,
+        pixelWidth: Int = 0,
+        pixelHeight: Int = 0,
+        isFavorite: Bool = false
+    ) {
         self.id = id
         self.year = year
         self.byteSize = byteSize
+        self.creationDate = creationDate
         self.lastKnownChangeDate = lastKnownChangeDate
         self.mediaType = mediaType
         self.mediaSubtypes = mediaSubtypes
         self.duration = duration
+        self.pixelWidth = pixelWidth
+        self.pixelHeight = pixelHeight
+        self.isFavorite = isFavorite
     }
 }
 
@@ -100,32 +118,40 @@ nonisolated struct TypeBucket: Identifiable, Equatable, Sendable {
 
 /// Actionable cleanup scenarios for the Insights tab
 nonisolated enum InsightCategory: String, CaseIterable, Identifiable, Sendable {
-    case oldScreenshots = "Old Screenshots"
+    case exactDuplicates = "Exact Duplicates"
+    case heavyOldVideos = "Heavy Old Videos"
+    case similarShots = "Similar Shots"
+    case receipts = "Receipts"
+    case chatMemeDump = "Chat/Meme Dump"
     case shortVideos = "Short Videos"
-    case oldScreenRecordings = "Old Screen Recordings"
-    case agedLivePhotos = "Aged Live Photos"
 
     nonisolated var id: String { rawValue }
 
     var icon: String {
         switch self {
-        case .oldScreenshots: return "rectangle.dashed"
-        case .shortVideos: return "video.badge.clock"
-        case .oldScreenRecordings: return "record.circle"
-        case .agedLivePhotos: return "livephoto"
+        case .exactDuplicates: return "square.on.square"
+        case .heavyOldVideos: return "film"
+        case .similarShots: return "photo.on.rectangle.angled"
+        case .receipts: return "doc.text"
+        case .chatMemeDump: return "message.fill"
+        case .shortVideos: return "video.fill"
         }
     }
 
     var ruleDescription: String {
         switch self {
-        case .oldScreenshots:
-            return "Screenshots older than 45 days"
+        case .exactDuplicates:
+            return "Verified duplicate groups. One best copy is kept."
+        case .heavyOldVideos:
+            return "Videos over 200 MB, older than 90 days"
+        case .similarShots:
+            return "Shots taken within a few seconds"
+        case .receipts:
+            return "Detected from text (OCR), older than 45 days"
+        case .chatMemeDump:
+            return "Chat screenshots and meme-like images"
         case .shortVideos:
-            return "Videos up to 10s, older than 14 days"
-        case .oldScreenRecordings:
-            return "Screen recordings older than 21 days"
-        case .agedLivePhotos:
-            return "Live Photos older than 180 days"
+            return "Videos up to 6s, older than 14 days"
         }
     }
 }
@@ -144,7 +170,7 @@ nonisolated struct InsightBucket: Identifiable, Equatable, Sendable {
 // MARK: - Library Index Snapshot
 
 nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
-    static let currentVersion = 2  // Bumped from 1 to add mediaType/mediaSubtypes/duration
+    static let currentVersion = 3
 
     let version: Int
     let lastIndexedAt: Date
@@ -189,14 +215,14 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
             .sorted { $0.year > $1.year }
     }
 
-    /// Aggregated month buckets for UI (derived from lastKnownChangeDate)
+    /// Aggregated month buckets for UI (derived from creationDate)
     var monthBuckets: [MonthBucket] {
         guard !assets.isEmpty else { return [] }
         let calendar = Calendar.current
 
         var counts: [String: (year: Int, month: Int, count: Int, bytes: Int64)] = [:]
         for asset in assets {
-            let month = calendar.component(.month, from: asset.lastKnownChangeDate)
+            let month = calendar.component(.month, from: asset.creationDate)
             let key = "\(asset.year)-\(String(format: "%02d", month))"
             let current = counts[key] ?? (asset.year, month, 0, 0)
             counts[key] = (current.year, current.month, current.count + 1, current.bytes + asset.byteSize)
@@ -271,74 +297,32 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
     func insightBuckets(referenceDate: Date) -> [InsightBucket] {
         guard !assets.isEmpty else { return [] }
 
-        let cutoffOldScreenshots = Calendar.current.date(byAdding: .day, value: -45, to: referenceDate) ?? .distantPast
-        let cutoffShortVideos = Calendar.current.date(byAdding: .day, value: -14, to: referenceDate) ?? .distantPast
-        let cutoffOldScreenRecordings = Calendar.current.date(byAdding: .day, value: -21, to: referenceDate) ?? .distantPast
-        let cutoffAgedLivePhotos = Calendar.current.date(byAdding: .day, value: -180, to: referenceDate) ?? .distantPast
-
-        var oldScreenshotsCount = 0, oldScreenshotsBytes: Int64 = 0
-        var shortVideosCount = 0, shortVideosBytes: Int64 = 0
-        var oldScreenRecordingsCount = 0, oldScreenRecordingsBytes: Int64 = 0
-        var agedLivePhotosCount = 0, agedLivePhotosBytes: Int64 = 0
-
-        for asset in assets {
-            let isScreenshot = (asset.mediaSubtypes & Self.screenshotMask) != 0
-            let isLivePhoto = (asset.mediaSubtypes & Self.photoLiveMask) != 0
-            let isScreenRecording = (asset.mediaSubtypes & Self.screenRecordingMask) != 0
-            let assetDate = asset.lastKnownChangeDate
-
-            if asset.mediaType == 1, isScreenshot, assetDate < cutoffOldScreenshots {
-                oldScreenshotsCount += 1
-                oldScreenshotsBytes += asset.byteSize
-            }
-
-            if asset.mediaType == 2, isScreenRecording, assetDate < cutoffOldScreenRecordings {
-                oldScreenRecordingsCount += 1
-                oldScreenRecordingsBytes += asset.byteSize
-            }
-
-            if asset.mediaType == 2,
-               !isScreenRecording,
-               asset.duration > 0,
-               asset.duration <= 10,
-               assetDate < cutoffShortVideos {
-                shortVideosCount += 1
-                shortVideosBytes += asset.byteSize
-            }
-
-            if asset.mediaType == 1, isLivePhoto, assetDate < cutoffAgedLivePhotos {
-                agedLivePhotosCount += 1
-                agedLivePhotosBytes += asset.byteSize
-            }
-        }
-
         var buckets: [InsightBucket] = []
-        if oldScreenshotsCount >= 12 {
+
+        let heavyVideos = assets(for: .heavyOldVideos, referenceDate: referenceDate)
+        if heavyVideos.count >= 1 {
             buckets.append(InsightBucket(
-                category: .oldScreenshots,
-                count: oldScreenshotsCount,
-                totalBytes: oldScreenshotsBytes
+                category: .heavyOldVideos,
+                count: heavyVideos.count,
+                totalBytes: heavyVideos.reduce(0) { $0 + $1.byteSize }
             ))
         }
-        if shortVideosCount >= 8 {
+
+        let similarCandidates = assets(for: .similarShots, referenceDate: referenceDate)
+        if similarCandidates.count >= 2 {
+            buckets.append(InsightBucket(
+                category: .similarShots,
+                count: similarCandidates.count,
+                totalBytes: similarCandidates.reduce(0) { $0 + $1.byteSize }
+            ))
+        }
+
+        let shortVideos = assets(for: .shortVideos, referenceDate: referenceDate)
+        if shortVideos.count >= 4 {
             buckets.append(InsightBucket(
                 category: .shortVideos,
-                count: shortVideosCount,
-                totalBytes: shortVideosBytes
-            ))
-        }
-        if oldScreenRecordingsCount >= 3 {
-            buckets.append(InsightBucket(
-                category: .oldScreenRecordings,
-                count: oldScreenRecordingsCount,
-                totalBytes: oldScreenRecordingsBytes
-            ))
-        }
-        if agedLivePhotosCount >= 8 {
-            buckets.append(InsightBucket(
-                category: .agedLivePhotos,
-                count: agedLivePhotosCount,
-                totalBytes: agedLivePhotosBytes
+                count: shortVideos.count,
+                totalBytes: shortVideos.reduce(0) { $0 + $1.byteSize }
             ))
         }
 
@@ -355,7 +339,7 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
         switch category {
         case .videos:
             return assets.filter { $0.mediaType == 2 }
-                .sorted { $0.lastKnownChangeDate > $1.lastKnownChangeDate }
+                .sorted { $0.creationDate > $1.creationDate }
 
         case .largestVideos:
             return assets.filter { $0.mediaType == 2 }
@@ -369,7 +353,7 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
                 ($0.mediaSubtypes & Self.photoLiveMask) == 0 &&
                 ($0.mediaSubtypes & Self.screenshotMask) == 0
             }
-            .sorted { $0.lastKnownChangeDate > $1.lastKnownChangeDate }
+            .sorted { $0.creationDate > $1.creationDate }
 
         case .largestPhotos:
             return assets.filter {
@@ -385,69 +369,185 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
             return assets.filter {
                 $0.mediaType == 1 && ($0.mediaSubtypes & Self.photoLiveMask) != 0
             }
-            .sorted { $0.lastKnownChangeDate > $1.lastKnownChangeDate }
+            .sorted { $0.creationDate > $1.creationDate }
 
         case .screenshots:
             return assets.filter {
                 $0.mediaType == 1 && ($0.mediaSubtypes & Self.screenshotMask) != 0
             }
-            .sorted { $0.lastKnownChangeDate > $1.lastKnownChangeDate }
+            .sorted { $0.creationDate > $1.creationDate }
 
         case .screenRecordings:
             return assets.filter {
                 $0.mediaType == 2 && ($0.mediaSubtypes & Self.screenRecordingMask) != 0
             }
-            .sorted { $0.lastKnownChangeDate > $1.lastKnownChangeDate }
+            .sorted { $0.creationDate > $1.creationDate }
         }
     }
 
     /// Get assets filtered by insight category
     func assets(for category: InsightCategory, referenceDate: Date = Date()) -> [IndexedAsset] {
-        let cutoffOldScreenshots = Calendar.current.date(byAdding: .day, value: -45, to: referenceDate) ?? .distantPast
-        let cutoffShortVideos = Calendar.current.date(byAdding: .day, value: -14, to: referenceDate) ?? .distantPast
-        let cutoffOldScreenRecordings = Calendar.current.date(byAdding: .day, value: -21, to: referenceDate) ?? .distantPast
-        let cutoffAgedLivePhotos = Calendar.current.date(byAdding: .day, value: -180, to: referenceDate) ?? .distantPast
+        let cutoffShortVideos = Self.cutoffDate(daysAgo: Self.shortVideoMinAgeDays, referenceDate: referenceDate)
+        let cutoffHeavyVideos = Self.cutoffDate(daysAgo: Self.heavyVideoMinAgeDays, referenceDate: referenceDate)
+        let cutoffSimilarShots = Self.cutoffDate(daysAgo: Self.similarShotsMinAgeDays, referenceDate: referenceDate)
+        let cutoffReceipts = Self.cutoffDate(daysAgo: Self.receiptMinAgeDays, referenceDate: referenceDate)
 
         switch category {
-        case .oldScreenshots:
+        case .exactDuplicates:
+            return duplicateCandidates()
+                .sorted { $0.creationDate < $1.creationDate }
+
+        case .heavyOldVideos:
             return assets.filter {
-                $0.mediaType == 1 &&
-                ($0.mediaSubtypes & Self.screenshotMask) != 0 &&
-                $0.lastKnownChangeDate < cutoffOldScreenshots
+                $0.mediaType == 2 &&
+                !$0.isFavorite &&
+                $0.byteSize >= Self.heavyVideoMinBytes &&
+                $0.creationDate < cutoffHeavyVideos
             }
-            .sorted { $0.lastKnownChangeDate < $1.lastKnownChangeDate }
+            .sorted { $0.byteSize > $1.byteSize }
 
         case .shortVideos:
             return assets.filter {
                 $0.mediaType == 2 &&
                 ($0.mediaSubtypes & Self.screenRecordingMask) == 0 &&
+                !$0.isFavorite &&
                 $0.duration > 0 &&
-                $0.duration <= 10 &&
-                $0.lastKnownChangeDate < cutoffShortVideos
+                $0.duration <= Self.shortVideoMaxDuration &&
+                $0.creationDate < cutoffShortVideos
             }
-            .sorted { $0.lastKnownChangeDate < $1.lastKnownChangeDate }
+            .sorted { $0.creationDate < $1.creationDate }
 
-        case .oldScreenRecordings:
-            return assets.filter {
-                $0.mediaType == 2 &&
-                ($0.mediaSubtypes & Self.screenRecordingMask) != 0 &&
-                $0.lastKnownChangeDate < cutoffOldScreenRecordings
-            }
-            .sorted { $0.lastKnownChangeDate < $1.lastKnownChangeDate }
+        case .similarShots:
+            return similarShotCandidates(maxCutoffDate: cutoffSimilarShots)
+                .sorted { $0.creationDate < $1.creationDate }
 
-        case .agedLivePhotos:
+        case .receipts:
+            // Receipt detection requires OCR and is computed by ReceiptInsightService.
             return assets.filter {
                 $0.mediaType == 1 &&
-                ($0.mediaSubtypes & Self.photoLiveMask) != 0 &&
-                $0.lastKnownChangeDate < cutoffAgedLivePhotos
+                $0.creationDate < cutoffReceipts
             }
-            .sorted { $0.lastKnownChangeDate < $1.lastKnownChangeDate }
+            .sorted { $0.creationDate < $1.creationDate }
+
+        case .chatMemeDump:
+            return assets.filter {
+                guard $0.mediaType == 1 else { return false }
+                guard !$0.isFavorite else { return false }
+                guard ($0.mediaSubtypes & Self.photoLiveMask) == 0 else { return false }
+
+                let isScreenshot = ($0.mediaSubtypes & Self.screenshotMask) != 0
+                let isSmallWebImage = $0.byteSize <= Self.chatMemeMaxBytes && min($0.pixelWidth, $0.pixelHeight) <= 1600
+                return isScreenshot || isSmallWebImage
+            }
+            .sorted { $0.creationDate < $1.creationDate }
         }
+    }
+
+    private func duplicateCandidates() -> [IndexedAsset] {
+        var groups: [DuplicateKey: [IndexedAsset]] = [:]
+        groups.reserveCapacity(assets.count)
+
+        for asset in assets where (asset.mediaType == 1 || asset.mediaType == 2) && asset.byteSize > 0 {
+            let key = DuplicateKey(
+                mediaType: asset.mediaType,
+                byteSize: asset.byteSize,
+                pixelWidth: asset.pixelWidth,
+                pixelHeight: asset.pixelHeight,
+                roundedDuration: Int((asset.duration * 10).rounded())
+            )
+            groups[key, default: []].append(asset)
+        }
+
+        var result: [IndexedAsset] = []
+        for group in groups.values where group.count >= 2 {
+            let keeperID = Self.preferredKeeper(in: group).id
+            result.append(contentsOf: group.filter { $0.id != keeperID })
+        }
+
+        return result
+    }
+
+    private func similarShotCandidates(maxCutoffDate: Date) -> [IndexedAsset] {
+        let candidates = assets.filter {
+            $0.mediaType == 1 &&
+            $0.creationDate < maxCutoffDate &&
+            ($0.mediaSubtypes & Self.screenshotMask) == 0 &&
+            ($0.mediaSubtypes & Self.photoLiveMask) == 0
+        }
+        .sorted { $0.creationDate < $1.creationDate }
+
+        guard candidates.count >= 3 else { return [] }
+
+        var clusters: [[IndexedAsset]] = []
+        var currentCluster: [IndexedAsset] = []
+
+        for asset in candidates {
+            if currentCluster.isEmpty {
+                currentCluster.append(asset)
+                continue
+            }
+
+            guard let last = currentCluster.last else { continue }
+            let delta = asset.creationDate.timeIntervalSince(last.creationDate)
+
+            if delta <= Self.similarShotsWindowSeconds {
+                currentCluster.append(asset)
+            } else {
+                if currentCluster.count >= 3 {
+                    clusters.append(currentCluster)
+                }
+                currentCluster = [asset]
+            }
+        }
+
+        if currentCluster.count >= 3 {
+            clusters.append(currentCluster)
+        }
+
+        var result: [IndexedAsset] = []
+        for cluster in clusters {
+            let keeperID = Self.preferredKeeper(in: cluster).id
+            result.append(contentsOf: cluster.filter { $0.id != keeperID })
+        }
+        return result
+    }
+
+    private static func preferredKeeper(in group: [IndexedAsset]) -> IndexedAsset {
+        group.max { lhs, rhs in
+            if lhs.isFavorite != rhs.isFavorite {
+                return !lhs.isFavorite && rhs.isFavorite
+            }
+            if lhs.byteSize != rhs.byteSize {
+                return lhs.byteSize < rhs.byteSize
+            }
+            return lhs.creationDate < rhs.creationDate
+        }
+        ?? group[0]
+    }
+
+    private static func cutoffDate(daysAgo: Int, referenceDate: Date) -> Date {
+        Calendar.current.date(byAdding: .day, value: -daysAgo, to: referenceDate) ?? .distantPast
+    }
+
+    private struct DuplicateKey: Hashable {
+        let mediaType: Int
+        let byteSize: Int64
+        let pixelWidth: Int
+        let pixelHeight: Int
+        let roundedDuration: Int
     }
 
     private static let photoLiveMask = 0x8
     private static let screenshotMask = 0x4
     private static let screenRecordingMask = 0x80000
+    private static let shortVideoMaxDuration: TimeInterval = 6
+    private static let shortVideoMinAgeDays = 14
+    private static let heavyVideoMinBytes: Int64 = 200 * 1_048_576
+    private static let heavyVideoMinAgeDays = 90
+    private static let similarShotsWindowSeconds: TimeInterval = 8
+    private static let similarShotsMinAgeDays = 7
+    private static let receiptMinAgeDays = 45
+    private static let chatMemeMaxBytes: Int64 = 8 * 1_048_576
 }
 
 // MARK: - Disk Store

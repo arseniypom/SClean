@@ -17,6 +17,11 @@ struct InsightGridView: View {
 
     @State private var hasAppeared = false
     @State private var showMoveAllConfirmation = false
+    
+    private enum DuplicateRole {
+        case keeper
+        case extra
+    }
 
     private let columns = [
         GridItem(.flexible(), spacing: 2),
@@ -45,7 +50,7 @@ struct InsightGridView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 if !visibleAssets.isEmpty {
-                    Button("Move All") {
+                    Button(moveButtonTitle) {
                         showMoveAllConfirmation = true
                     }
                     .font(Typography.subheadline)
@@ -62,13 +67,13 @@ struct InsightGridView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             permissionService.refreshStatus()
         }
-        .alert("Move all to Trash?", isPresented: $showMoveAllConfirmation) {
+        .alert(moveAlertTitle, isPresented: $showMoveAllConfirmation) {
             Button("Cancel", role: .cancel) {}
             Button("Move", role: .destructive) {
                 moveAllVisibleToTrash()
             }
         } message: {
-            Text("This adds \(visibleAssets.count) items to Trash. You can review and restore them later.")
+            Text(moveAlertMessage)
         }
     }
 
@@ -136,6 +141,7 @@ struct InsightGridView: View {
     private func gridView(_ originalAssets: [YearAsset]) -> some View {
         let excludedIDs = trashService.excludedIDs
         let filteredAssets = originalAssets.filter { !excludedIDs.contains($0.id) }
+        let duplicateGroupByAssetID = photosService.exactDuplicateGroupByAssetID
 
         return GeometryReader { proxy in
             let horizontalPadding: CGFloat = 2 * 2
@@ -147,7 +153,7 @@ struct InsightGridView: View {
                 VStack(spacing: 0) {
                     InfoBanner(
                         icon: bucket.category.icon,
-                        message: bucket.category.ruleDescription,
+                        message: insightInfoMessage,
                         style: .info
                     )
                     .padding(.horizontal, Spacing.md)
@@ -163,6 +169,12 @@ struct InsightGridView: View {
                         }
                         .padding(.horizontal, Spacing.md)
                         .padding(.bottom, Spacing.sm)
+                    }
+
+                    if bucket.category == .exactDuplicates && !duplicateGroupByAssetID.isEmpty {
+                        exactDuplicateLegend
+                            .padding(.horizontal, Spacing.md)
+                            .padding(.bottom, Spacing.sm)
                     }
 
                     LazyVGrid(columns: columns, spacing: spacing) {
@@ -195,11 +207,52 @@ struct InsightGridView: View {
         photosService.state.assets.filter { !trashService.excludedIDs.contains($0.id) }
     }
 
+    private var moveButtonTitle: String {
+        bucket.category == .exactDuplicates ? "Move Extras" : "Move All"
+    }
+
+    private var moveAlertTitle: String {
+        bucket.category == .exactDuplicates ? "Move duplicate extras to Trash?" : "Move all to Trash?"
+    }
+
+    private var moveAlertMessage: String {
+        if bucket.category == .exactDuplicates {
+            let extrasCount = visibleAssets.filter { photosService.exactDuplicateDeletableIDs.contains($0.id) }.count
+            return "All copies are visible for review. SClean will keep one best copy per group and move \(extrasCount) extras to Trash."
+        }
+        return "This adds \(visibleAssets.count) items to Trash. You can review and restore them later."
+    }
+
+    private var insightInfoMessage: String {
+        if bucket.category == .exactDuplicates {
+            return "All verified copies are shown. Move Extras keeps one best copy per group."
+        }
+        return bucket.category.ruleDescription
+    }
+
     @ViewBuilder
     private func gridCell(for asset: YearAsset, size: CGFloat) -> some View {
         ThumbnailImageView(assetID: asset.id)
             .frame(width: size, height: size)
             .clipped()
+            .overlay(alignment: .topLeading) {
+                if let groupTag = duplicateGroupTag(for: asset.id) {
+                    insightChip(groupTag, tint: .scInfo)
+                        .padding(4)
+                }
+            }
+            .overlay(alignment: .topTrailing) {
+                if let role = duplicateRole(for: asset.id) {
+                    switch role {
+                    case .keeper:
+                        insightChip("Keep", tint: .scSuccess)
+                            .padding(4)
+                    case .extra:
+                        insightChip("Extra", tint: .scWarning)
+                            .padding(4)
+                    }
+                }
+            }
             .overlay(alignment: .bottomTrailing) {
                 if asset.isVideo {
                     Text(formatDuration(asset.duration))
@@ -210,6 +263,12 @@ struct InsightGridView: View {
                         .background(.black.opacity(0.6))
                         .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
                         .padding(4)
+                }
+            }
+            .overlay {
+                if let role = duplicateRole(for: asset.id) {
+                    Rectangle()
+                        .strokeBorder(role == .keeper ? Color.scSuccess.opacity(0.65) : Color.scWarning.opacity(0.65), lineWidth: 2)
                 }
             }
     }
@@ -223,9 +282,67 @@ struct InsightGridView: View {
     private func moveAllVisibleToTrash() {
         guard !visibleAssets.isEmpty else { return }
 
+        if bucket.category == .exactDuplicates {
+            let deletable = photosService.exactDuplicateDeletableIDs
+            let orderedIDs = visibleAssets.map(\.id)
+            let idsToTrash = orderedIDs.filter { deletable.contains($0) }
+            for id in idsToTrash {
+                trashService.trash(id)
+            }
+            return
+        }
+
         for asset in visibleAssets {
             trashService.trash(asset.id)
         }
+    }
+    
+    @ViewBuilder
+    private var exactDuplicateLegend: some View {
+        HStack(spacing: Spacing.xs) {
+            insightChip("Keep", tint: .scSuccess)
+            insightChip("Extra", tint: .scWarning)
+            if exactDuplicateGroupCount > 0 {
+                insightChip("\(exactDuplicateGroupCount) groups", tint: .scInfo)
+            }
+            Spacer()
+        }
+    }
+    
+    private var exactDuplicateGroupCount: Int {
+        Set(photosService.exactDuplicateGroupByAssetID.values).count
+    }
+    
+    private func duplicateGroupTag(for assetID: String) -> String? {
+        guard bucket.category == .exactDuplicates,
+              let groupIndex = photosService.exactDuplicateGroupByAssetID[assetID] else {
+            return nil
+        }
+        return "G\(groupIndex)"
+    }
+    
+    private func duplicateRole(for assetID: String) -> DuplicateRole? {
+        guard bucket.category == .exactDuplicates else { return nil }
+        if photosService.exactDuplicateKeeperIDs.contains(assetID) {
+            return .keeper
+        }
+        if photosService.exactDuplicateDeletableIDs.contains(assetID) {
+            return .extra
+        }
+        return nil
+    }
+    
+    private func insightChip(_ text: String, tint: Color) -> some View {
+        Text(text)
+            .font(Typography.caption2.weight(.semibold))
+            .foregroundStyle(Color.scTextPrimary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(tint.opacity(0.2), in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(tint.opacity(0.55), lineWidth: 1)
+            }
     }
 
     private func loadPhotos() {
@@ -237,7 +354,7 @@ struct InsightGridView: View {
 
 #Preview {
     let permissionService = PhotoPermissionService()
-    let bucket = InsightBucket(category: .oldScreenshots, count: 42, totalBytes: 210_000_000)
+    let bucket = InsightBucket(category: .shortVideos, count: 42, totalBytes: 210_000_000)
 
     return NavigationStack {
         InsightGridView(bucket: bucket, snapshot: nil, permissionService: permissionService)

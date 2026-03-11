@@ -61,8 +61,9 @@ final class PhotoLibraryService: ObservableObject {
     /// Current type buckets derived from the latest snapshot
     private(set) var typeBuckets: [TypeBucket] = []
 
-    /// Current insight buckets derived from the latest snapshot
-    private(set) var insightBuckets: [InsightBucket] = []
+    /// Current insight buckets derived from the latest snapshot.
+    /// Published so async receipt analysis can refresh Home without full state reload.
+    @Published private(set) var insightBuckets: [InsightBucket] = []
 
     /// Current snapshot for type-filtered asset lookups
     private(set) var currentSnapshot: LibraryIndexSnapshot?
@@ -70,6 +71,9 @@ final class PhotoLibraryService: ObservableObject {
     private let indexStore: LibraryIndexStore
     private let indexer: LibraryIndexer
     private var changeObserverWrapper: ChangeObserverWrapper?
+    private var exactDuplicateInsightTask: Task<Void, Never>?
+    private var receiptInsightTask: Task<Void, Never>?
+    private var chatMemeInsightTask: Task<Void, Never>?
     
     init(
         indexStore: LibraryIndexStore = .shared,
@@ -91,8 +95,11 @@ final class PhotoLibraryService: ObservableObject {
             state = .loaded(cachedSnapshot.yearBuckets)
             monthBuckets = cachedSnapshot.monthBuckets
             typeBuckets = cachedSnapshot.typeBuckets
-            insightBuckets = cachedSnapshot.insightBuckets
+            insightBuckets = cachedSnapshot.insightBuckets.filter { $0.category != .exactDuplicates }
             currentSnapshot = cachedSnapshot
+            startExactDuplicateInsightRefresh(for: cachedSnapshot, analysisBudget: 220)
+            startReceiptInsightRefresh(for: cachedSnapshot, analysisBudget: 120)
+            startChatMemeInsightRefresh(for: cachedSnapshot, analysisBudget: 140)
         } else {
             state = .loading
         }
@@ -123,7 +130,10 @@ final class PhotoLibraryService: ObservableObject {
         currentSnapshot = snapshot
         monthBuckets = snapshot.monthBuckets
         typeBuckets = snapshot.typeBuckets
-        insightBuckets = snapshot.insightBuckets
+        insightBuckets = snapshot.insightBuckets.filter { $0.category != .exactDuplicates }
+        startExactDuplicateInsightRefresh(for: snapshot, analysisBudget: 300)
+        startReceiptInsightRefresh(for: snapshot, analysisBudget: 220)
+        startChatMemeInsightRefresh(for: snapshot, analysisBudget: 250)
 
         let buckets = snapshot.yearBuckets
         if buckets.isEmpty {
@@ -132,6 +142,12 @@ final class PhotoLibraryService: ObservableObject {
             typeBuckets = []
             insightBuckets = []
             currentSnapshot = nil
+            exactDuplicateInsightTask?.cancel()
+            exactDuplicateInsightTask = nil
+            receiptInsightTask?.cancel()
+            receiptInsightTask = nil
+            chatMemeInsightTask?.cancel()
+            chatMemeInsightTask = nil
         } else {
             state = .loaded(buckets)
         }
@@ -157,6 +173,62 @@ final class PhotoLibraryService: ObservableObject {
     
     func stopObservingChanges() {
         changeObserverWrapper = nil
+        exactDuplicateInsightTask?.cancel()
+        exactDuplicateInsightTask = nil
+        receiptInsightTask?.cancel()
+        receiptInsightTask = nil
+        chatMemeInsightTask?.cancel()
+        chatMemeInsightTask = nil
+    }
+
+    private func startExactDuplicateInsightRefresh(for snapshot: LibraryIndexSnapshot, analysisBudget: Int) {
+        exactDuplicateInsightTask?.cancel()
+        exactDuplicateInsightTask = Task { [weak self] in
+            let exactBucket = await ExactDuplicateInsightService.shared.exactDuplicateBucket(
+                snapshot: snapshot,
+                analysisBudget: analysisBudget
+            )
+            guard !Task.isCancelled else { return }
+            await self?.mergeAsyncInsightBucket(exactBucket, category: .exactDuplicates)
+        }
+    }
+
+    private func startReceiptInsightRefresh(for snapshot: LibraryIndexSnapshot, analysisBudget: Int) {
+        receiptInsightTask?.cancel()
+        receiptInsightTask = Task { [weak self] in
+            let receiptBucket = await ReceiptInsightService.shared.receiptBucket(
+                snapshot: snapshot,
+                analysisBudget: analysisBudget
+            )
+            guard !Task.isCancelled else { return }
+            await self?.mergeAsyncInsightBucket(receiptBucket, category: .receipts)
+        }
+    }
+
+    private func startChatMemeInsightRefresh(for snapshot: LibraryIndexSnapshot, analysisBudget: Int) {
+        chatMemeInsightTask?.cancel()
+        chatMemeInsightTask = Task { [weak self] in
+            let chatMemeBucket = await ChatMemeInsightService.shared.chatMemeBucket(
+                snapshot: snapshot,
+                analysisBudget: analysisBudget
+            )
+            guard !Task.isCancelled else { return }
+            await self?.mergeAsyncInsightBucket(chatMemeBucket, category: .chatMemeDump)
+        }
+    }
+
+    @MainActor
+    private func mergeAsyncInsightBucket(_ bucket: InsightBucket?, category: InsightCategory) {
+        insightBuckets.removeAll { $0.category == category }
+        if let bucket {
+            insightBuckets.append(bucket)
+        }
+        insightBuckets.sort { lhs, rhs in
+            if lhs.totalBytes == rhs.totalBytes {
+                return lhs.count > rhs.count
+            }
+            return lhs.totalBytes > rhs.totalBytes
+        }
     }
 }
 

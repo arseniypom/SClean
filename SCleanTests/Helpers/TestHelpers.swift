@@ -56,19 +56,27 @@ enum TestFactory {
         id: String,
         year: Int = 2024,
         byteSize: Int64 = 1_000_000,
+        creationDate: Date = Date(),
         lastKnownChangeDate: Date = Date(),
         mediaType: Int = 0,
         mediaSubtypes: Int = 0,
-        duration: TimeInterval = 0
+        duration: TimeInterval = 0,
+        pixelWidth: Int = 1200,
+        pixelHeight: Int = 900,
+        isFavorite: Bool = false
     ) -> IndexedAsset {
         IndexedAsset(
             id: id,
             year: year,
             byteSize: byteSize,
+            creationDate: creationDate,
             lastKnownChangeDate: lastKnownChangeDate,
             mediaType: mediaType,
             mediaSubtypes: mediaSubtypes,
-            duration: duration
+            duration: duration,
+            pixelWidth: pixelWidth,
+            pixelHeight: pixelHeight,
+            isFavorite: isFavorite
         )
     }
 
