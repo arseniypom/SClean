@@ -252,6 +252,21 @@ struct LibraryIndexStoreTests {
 
         #expect(result.map(\.id) == ["newer-video", "old-video-modified-recently"])
     }
+    
+    @Test func snapshot_typeBuckets_includeOnlyMediaTypesNotLargeSlices() {
+        let date = Date(timeIntervalSince1970: 1_767_225_600)
+        let assets = [
+            TestFactory.indexedAsset(id: "photo", creationDate: date, lastKnownChangeDate: date, mediaType: 1),
+            TestFactory.indexedAsset(id: "video", creationDate: date, lastKnownChangeDate: date, mediaType: 2),
+            TestFactory.indexedAsset(id: "live", creationDate: date, lastKnownChangeDate: date, mediaType: 1, mediaSubtypes: 0x8),
+            TestFactory.indexedAsset(id: "shot", creationDate: date, lastKnownChangeDate: date, mediaType: 1, mediaSubtypes: 0x4),
+            TestFactory.indexedAsset(id: "rec", creationDate: date, lastKnownChangeDate: date, mediaType: 2, mediaSubtypes: 0x80000)
+        ]
+        let snapshot = TestFactory.librarySnapshot(assets: assets)
+
+        let categories = Set(snapshot.typeBuckets.map(\.category))
+        #expect(categories == Set([.photos, .videos, .livePhotos, .screenshots, .screenRecordings]))
+    }
 
     // MARK: - Insights Tests
 
@@ -323,10 +338,47 @@ struct LibraryIndexStoreTests {
         let snapshot = TestFactory.librarySnapshot(assets: assets)
         let buckets = snapshot.insightBuckets(referenceDate: referenceDate)
 
-        #expect(buckets.count == 3)
-        #expect(buckets[0].category == .heavyOldVideos)
-        #expect(buckets[1].category == .shortVideos)
-        #expect(buckets[2].category == .similarShots)
+        #expect(buckets.count == 4)
+        #expect(buckets[0].category == .largeVideos)
+        #expect(buckets[1].category == .heavyOldVideos)
+        #expect(buckets[2].category == .shortVideos)
+        #expect(buckets[3].category == .similarShots)
+    }
+    
+    @Test func snapshot_insightBuckets_includesLargeMediaInsightsWhenThresholdsMet() {
+        let referenceDate = Date(timeIntervalSince1970: 1_767_225_600)
+        let oldDate = Date(timeIntervalSince1970: 1_746_576_000)
+
+        var assets: [IndexedAsset] = []
+        for index in 0..<3 {
+            assets.append(
+                TestFactory.indexedAsset(
+                    id: "lv-\(index)",
+                    byteSize: 250 * TestBytes.oneMB,
+                    creationDate: oldDate,
+                    lastKnownChangeDate: oldDate,
+                    mediaType: 2,
+                    duration: 40
+                )
+            )
+        }
+        for index in 0..<5 {
+            assets.append(
+                TestFactory.indexedAsset(
+                    id: "lp-\(index)",
+                    byteSize: 70 * TestBytes.oneMB,
+                    creationDate: oldDate,
+                    lastKnownChangeDate: oldDate,
+                    mediaType: 1
+                )
+            )
+        }
+
+        let snapshot = TestFactory.librarySnapshot(assets: assets)
+        let categories = Set(snapshot.insightBuckets(referenceDate: referenceDate).map(\.category))
+
+        #expect(categories.contains(.largeVideos))
+        #expect(categories.contains(.largePhotos))
     }
 
     @Test func snapshot_insightBuckets_skipsNonActionableSmallGroups() {

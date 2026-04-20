@@ -158,7 +158,7 @@ struct TypeGridView: View {
                                     permissionService: permissionService
                                 )
                             } label: {
-                                gridCell(for: asset, size: side, showSizeBadge: isLargestCategory)
+                                gridCell(for: asset, size: side)
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
@@ -171,14 +171,10 @@ struct TypeGridView: View {
         }
     }
 
-    private var isLargestCategory: Bool {
-        bucket.category == .largestVideos || bucket.category == .largestPhotos
-    }
-
     // MARK: - Grid Cell
 
     @ViewBuilder
-    private func gridCell(for asset: YearAsset, size: CGFloat, showSizeBadge: Bool) -> some View {
+    private func gridCell(for asset: YearAsset, size: CGFloat) -> some View {
         ThumbnailImageView(assetID: asset.id)
             .frame(width: size, height: size)
             .clipped()

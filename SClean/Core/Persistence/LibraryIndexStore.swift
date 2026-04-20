@@ -80,8 +80,6 @@ nonisolated struct MonthBucket: Identifiable, Equatable, Sendable {
 
 /// Media type categories for the Types tab
 nonisolated enum TypeCategory: String, CaseIterable, Identifiable, Sendable {
-    case largestVideos = "Largest Videos"
-    case largestPhotos = "Largest Photos"
     case screenshots = "Screenshots"
     case screenRecordings = "Screen Recordings"
     case videos = "Videos"
@@ -92,8 +90,6 @@ nonisolated enum TypeCategory: String, CaseIterable, Identifiable, Sendable {
 
     var icon: String {
         switch self {
-        case .largestVideos: return "video.fill"
-        case .largestPhotos: return "photo.fill"
         case .screenshots: return "rectangle.dashed"
         case .screenRecordings: return "record.circle"
         case .videos: return "video"
@@ -118,6 +114,8 @@ nonisolated struct TypeBucket: Identifiable, Equatable, Sendable {
 
 /// Actionable cleanup scenarios for the Insights tab
 nonisolated enum InsightCategory: String, CaseIterable, Identifiable, Sendable {
+    case largeVideos = "Large Videos"
+    case largePhotos = "Large Photos"
     case exactDuplicates = "Exact Duplicates"
     case heavyOldVideos = "Heavy Old Videos"
     case similarShots = "Similar Shots"
@@ -129,6 +127,8 @@ nonisolated enum InsightCategory: String, CaseIterable, Identifiable, Sendable {
 
     var icon: String {
         switch self {
+        case .largeVideos: return "video.fill"
+        case .largePhotos: return "photo.fill"
         case .exactDuplicates: return "square.on.square"
         case .heavyOldVideos: return "film"
         case .similarShots: return "photo.on.rectangle.angled"
@@ -140,6 +140,10 @@ nonisolated enum InsightCategory: String, CaseIterable, Identifiable, Sendable {
 
     var ruleDescription: String {
         switch self {
+        case .largeVideos:
+            return "Top 50 largest videos by file size (favorites excluded)"
+        case .largePhotos:
+            return "Top 50 largest photos by file size (favorites excluded)"
         case .exactDuplicates:
             return "Verified duplicate groups. One best copy is kept."
         case .heavyOldVideos:
@@ -278,8 +282,6 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
         }
 
         return [
-            TypeBucket(category: .largestVideos, count: min(videoCount, 50), totalBytes: videoBytes),
-            TypeBucket(category: .largestPhotos, count: min(photoCount, 50), totalBytes: photoBytes),
             TypeBucket(category: .screenshots, count: screenshotCount, totalBytes: screenshotBytes),
             TypeBucket(category: .screenRecordings, count: screenRecordingCount, totalBytes: screenRecordingBytes),
             TypeBucket(category: .videos, count: videoCount, totalBytes: videoBytes),
@@ -298,6 +300,26 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
         guard !assets.isEmpty else { return [] }
 
         var buckets: [InsightBucket] = []
+
+        let largeVideos = assets(for: .largeVideos, referenceDate: referenceDate)
+        let largeVideosBytes = largeVideos.reduce(Int64(0)) { $0 + $1.byteSize }
+        if largeVideos.count >= Self.largeVideosMinCount && largeVideosBytes >= Self.largeVideosMinTotalBytes {
+            buckets.append(InsightBucket(
+                category: .largeVideos,
+                count: largeVideos.count,
+                totalBytes: largeVideosBytes
+            ))
+        }
+
+        let largePhotos = assets(for: .largePhotos, referenceDate: referenceDate)
+        let largePhotosBytes = largePhotos.reduce(Int64(0)) { $0 + $1.byteSize }
+        if largePhotos.count >= Self.largePhotosMinCount && largePhotosBytes >= Self.largePhotosMinTotalBytes {
+            buckets.append(InsightBucket(
+                category: .largePhotos,
+                count: largePhotos.count,
+                totalBytes: largePhotosBytes
+            ))
+        }
 
         let heavyVideos = assets(for: .heavyOldVideos, referenceDate: referenceDate)
         if heavyVideos.count >= 1 {
@@ -341,12 +363,6 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
             return assets.filter { $0.mediaType == 2 }
                 .sorted { $0.creationDate > $1.creationDate }
 
-        case .largestVideos:
-            return assets.filter { $0.mediaType == 2 }
-                .sorted { $0.byteSize > $1.byteSize }
-                .prefix(50)
-                .map { $0 }
-
         case .photos:
             return assets.filter {
                 $0.mediaType == 1 &&
@@ -354,16 +370,6 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
                 ($0.mediaSubtypes & Self.screenshotMask) == 0
             }
             .sorted { $0.creationDate > $1.creationDate }
-
-        case .largestPhotos:
-            return assets.filter {
-                $0.mediaType == 1 &&
-                ($0.mediaSubtypes & Self.photoLiveMask) == 0 &&
-                ($0.mediaSubtypes & Self.screenshotMask) == 0
-            }
-            .sorted { $0.byteSize > $1.byteSize }
-            .prefix(50)
-            .map { $0 }
 
         case .livePhotos:
             return assets.filter {
@@ -393,6 +399,26 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
         let cutoffReceipts = Self.cutoffDate(daysAgo: Self.receiptMinAgeDays, referenceDate: referenceDate)
 
         switch category {
+        case .largeVideos:
+            return assets.filter {
+                $0.mediaType == 2 &&
+                !$0.isFavorite
+            }
+            .sorted { $0.byteSize > $1.byteSize }
+            .prefix(Self.largeMediaLimit)
+            .map { $0 }
+
+        case .largePhotos:
+            return assets.filter {
+                $0.mediaType == 1 &&
+                ($0.mediaSubtypes & Self.photoLiveMask) == 0 &&
+                ($0.mediaSubtypes & Self.screenshotMask) == 0 &&
+                !$0.isFavorite
+            }
+            .sorted { $0.byteSize > $1.byteSize }
+            .prefix(Self.largeMediaLimit)
+            .map { $0 }
+
         case .exactDuplicates:
             return duplicateCandidates()
                 .sorted { $0.creationDate < $1.creationDate }
@@ -548,6 +574,11 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
     private static let similarShotsMinAgeDays = 7
     private static let receiptMinAgeDays = 45
     private static let chatMemeMaxBytes: Int64 = 8 * 1_048_576
+    private static let largeMediaLimit = 50
+    private static let largeVideosMinCount = 3
+    private static let largeVideosMinTotalBytes: Int64 = 500 * 1_048_576
+    private static let largePhotosMinCount = 5
+    private static let largePhotosMinTotalBytes: Int64 = 300 * 1_048_576
 }
 
 // MARK: - Disk Store
