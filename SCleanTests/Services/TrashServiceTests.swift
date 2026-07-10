@@ -185,6 +185,51 @@ struct TrashServiceTests {
         #expect(service2.isTrashed("b"))
     }
 
+    // MARK: - Fast Lookup Set Consistency
+
+    @Test func trashedIDs_staysConsistentAcrossAllMutations() async throws {
+        let service = makeService()
+
+        service.trash("a")
+        service.trash("b")
+        service.trash("c")
+        service.trash("d")
+        #expect(service.trashedIDs == ["a", "b", "c", "d"])
+
+        service.restore("a")
+        #expect(service.trashedIDs == ["b", "c", "d"])
+        #expect(!service.isTrashed("a"))
+
+        service.restoreMultiple(["b"])
+        #expect(service.trashedIDs == ["c", "d"])
+
+        service.remove(["c"])
+        #expect(service.trashedIDs == ["d"])
+
+        service.markDeleted(["d"])
+        #expect(service.trashedIDs.isEmpty)
+        #expect(service.permanentlyDeletedIDs == ["d"])
+        #expect(service.excludedIDs == ["d"])
+
+        service.trash("e")
+        service.clearAll()
+        #expect(service.trashedIDs.isEmpty)
+        #expect(!service.isTrashed("e"))
+    }
+
+    @Test func trashedIDs_populatedAfterReloadFromStorage() async throws {
+        let storage = MockKeyValueStore()
+        let dateProvider = MockDateProvider()
+
+        let service1 = TrashService(storage: storage, dateProvider: dateProvider)
+        service1.trash("a")
+        service1.trash("b")
+
+        let service2 = TrashService(storage: storage, dateProvider: dateProvider)
+
+        #expect(service2.trashedIDs == ["a", "b"])
+    }
+
     @Test func migration_convertsLegacySetFormat() async throws {
         let storage = MockKeyValueStore()
         let dateProvider = MockDateProvider()

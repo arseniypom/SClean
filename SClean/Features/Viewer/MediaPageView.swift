@@ -14,9 +14,10 @@ struct MediaPageView: View {
     let onUndoTrash: (() -> Void)?
     
     @State private var image: UIImage?
+    @State private var isFinalImage: Bool
     @State private var isLoading: Bool
     @State private var hasError = false
-    @State private var loadTask: Task<Void, Never>?
+    @State private var loadToken: UUID?
 
     init(
         asset: YearAsset,
@@ -30,14 +31,23 @@ struct MediaPageView: View {
         self.onUndoTrash = onUndoTrash
 
         // Pre-populate from cache to avoid loading state flash (blink/shift bug fix)
-        // When TabView switches pages, each page is a fresh view with new @State.
-        // Without this, the view briefly shows ProgressView before the cached image loads.
+        // Each page is a fresh view identity with new @State, so without this the
+        // view briefly shows ProgressView before the cached image loads. A degraded
+        // (fast preview) image is good enough to start with — the final image
+        // sharpens in place once loaded.
         if asset.mediaType != .video,
            let cached = FullImageLoader.shared.getCachedImage(for: asset.id) {
             _image = State(initialValue: cached)
+            _isFinalImage = State(initialValue: true)
+            _isLoading = State(initialValue: false)
+        } else if asset.mediaType != .video,
+                  let preview = FullImageLoader.shared.getDisplayableImage(for: asset.id) {
+            _image = State(initialValue: preview)
+            _isFinalImage = State(initialValue: false)
             _isLoading = State(initialValue: false)
         } else {
             _image = State(initialValue: nil)
+            _isFinalImage = State(initialValue: false)
             _isLoading = State(initialValue: asset.mediaType != .video)
         }
     }
@@ -70,8 +80,8 @@ struct MediaPageView: View {
             cancelLoad()
         }
         .onChange(of: isCurrentPage) { _, isCurrent in
-            // Reload if becoming current and no image yet
-            if isCurrent && image == nil && asset.mediaType != .video {
+            // Reload if becoming current without a full-quality image yet
+            if isCurrent && !isFinalImage && asset.mediaType != .video {
                 loadImage()
             }
         }
@@ -189,39 +199,51 @@ struct MediaPageView: View {
     // MARK: - Image Loading
     
     private func loadImage() {
-        guard image == nil else { return }
+        guard !isFinalImage, loadToken == nil else { return }
 
         // Synchronous cache check - instant display for prefetched images
         if let cached = FullImageLoader.shared.getCachedImage(for: asset.id) {
             image = cached
+            isFinalImage = true
             isLoading = false
             return
         }
 
-        // Async fallback for cache misses
-        isLoading = true
         hasError = false
+        if image == nil {
+            isLoading = true
+        }
 
-        loadTask = Task {
-            let loaded = await FullImageLoader.shared.loadFullImage(for: asset.id)
-
-            if !Task.isCancelled {
-                if let loaded {
+        // Progressive load: degraded preview lands immediately (no spinner),
+        // the full-quality image then sharpens in place.
+        loadToken = FullImageLoader.shared.loadImage(for: asset.id) { loaded, isFinal in
+            if let loaded {
+                if isFinal {
+                    loadToken = nil
+                    isFinalImage = true
+                    isLoading = false
                     withAnimation(.easeIn(duration: AnimationDuration.fast)) {
                         image = loaded
-                        isLoading = false
                     }
-                } else {
+                } else if !isFinalImage {
+                    image = loaded
+                    isLoading = false
+                }
+            } else if isFinal {
+                loadToken = nil
+                if image == nil {
                     hasError = true
                     isLoading = false
                 }
             }
         }
     }
-    
+
     private func cancelLoad() {
-        loadTask?.cancel()
-        loadTask = nil
+        if let token = loadToken {
+            loadToken = nil
+            FullImageLoader.shared.cancelLoad(for: asset.id, token: token)
+        }
     }
 }
 

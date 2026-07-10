@@ -33,7 +33,9 @@ final class TrashService: ObservableObject {
     static let shared = TrashService()
 
     /// All trashed items (ordered by trashedAt, oldest first)
-    @Published private(set) var trashedItems: [TrashedItem] = []
+    @Published private(set) var trashedItems: [TrashedItem] = [] {
+        didSet { trashedIDSet = Set(trashedItems.map(\.assetID)) }
+    }
 
     /// Last trashed item (for undo)
     @Published private(set) var lastTrashedID: String?
@@ -41,9 +43,13 @@ final class TrashService: ObservableObject {
     /// Total count of trashed items
     var trashCount: Int { trashedItems.count }
 
+    /// Mirror of trashedItems IDs, kept in sync via didSet so isTrashed stays O(1)
+    /// even when called per-page inside render loops.
+    private var trashedIDSet: Set<String> = []
+
     /// Set of trashed IDs for fast lookup
     var trashedIDs: Set<String> {
-        Set(trashedItems.map(\.assetID))
+        trashedIDSet
     }
 
     /// Ordered list of trashed asset IDs (oldest first)
@@ -121,7 +127,7 @@ final class TrashService: ObservableObject {
     
     /// Check if an asset is in trash
     func isTrashed(_ assetID: String) -> Bool {
-        trashedItems.contains { $0.assetID == assetID }
+        trashedIDSet.contains(assetID)
     }
     
     /// Get trashed item by ID
