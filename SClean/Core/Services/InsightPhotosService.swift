@@ -110,6 +110,28 @@ final class InsightPhotosService: ObservableObject {
             assets = await Task.detached(priority: .userInitiated) {
                 Self.fetchAssetsForIdentifiers(chatMemeIDs, snapshot: snapshot)
             }.value
+        } else if category == .similarShots {
+            exactDuplicateGroupByAssetID = [:]
+            exactDuplicateDeletableIDs = []
+            exactDuplicateKeeperIDs = []
+            let similarIDs = await SimilarShotsInsightService.shared.similarShotsDeletableIDs(
+                snapshot: snapshot,
+                referenceDate: referenceDate
+            )
+            assets = await Task.detached(priority: .userInitiated) {
+                Self.fetchAssetsForIdentifiers(similarIDs, snapshot: snapshot)
+            }.value
+        } else if category == .lowQuality {
+            exactDuplicateGroupByAssetID = [:]
+            exactDuplicateDeletableIDs = []
+            exactDuplicateKeeperIDs = []
+            let lowQualityIDs = await AestheticsInsightService.shared.lowQualityAssetIDs(
+                snapshot: snapshot,
+                referenceDate: referenceDate
+            )
+            assets = await Task.detached(priority: .userInitiated) {
+                Self.fetchAssetsForIdentifiers(lowQualityIDs, snapshot: snapshot)
+            }.value
         } else {
             exactDuplicateGroupByAssetID = [:]
             exactDuplicateDeletableIDs = []

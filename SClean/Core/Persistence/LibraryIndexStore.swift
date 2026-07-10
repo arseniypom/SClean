@@ -122,6 +122,7 @@ nonisolated enum InsightCategory: String, CaseIterable, Identifiable, Sendable {
     case receipts = "Receipts"
     case chatMemeDump = "Chat/Meme Dump"
     case shortVideos = "Short Videos"
+    case lowQuality = "Blurry & Low Quality"
 
     nonisolated var id: String { rawValue }
 
@@ -135,6 +136,7 @@ nonisolated enum InsightCategory: String, CaseIterable, Identifiable, Sendable {
         case .receipts: return "doc.text"
         case .chatMemeDump: return "message.fill"
         case .shortVideos: return "video.fill"
+        case .lowQuality: return "camera.badge.ellipsis"
         }
     }
 
@@ -156,6 +158,8 @@ nonisolated enum InsightCategory: String, CaseIterable, Identifiable, Sendable {
             return "Chat screenshots and meme-like images"
         case .shortVideos:
             return "Videos up to 6s, older than 14 days"
+        case .lowQuality:
+            return "Blurry or unflattering shots (favorites & screenshots excluded)"
         }
     }
 }
@@ -257,12 +261,14 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
 
         for asset in assets {
             if asset.mediaType == 2 { // Video
-                videoCount += 1
-                videoBytes += asset.byteSize
-                // Check if it's a screen recording
+                // Screen recordings are a distinct category, not counted as regular videos,
+                // so the per-type totals stay mutually exclusive (no double counting).
                 if (asset.mediaSubtypes & screenRecordingMask) != 0 {
                     screenRecordingCount += 1
                     screenRecordingBytes += asset.byteSize
+                } else {
+                    videoCount += 1
+                    videoBytes += asset.byteSize
                 }
             } else if asset.mediaType == 1 { // Image
                 let isLivePhoto = (asset.mediaSubtypes & photoLiveMask) != 0
@@ -360,8 +366,12 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
     func assets(for category: TypeCategory) -> [IndexedAsset] {
         switch category {
         case .videos:
-            return assets.filter { $0.mediaType == 2 }
-                .sorted { $0.creationDate > $1.creationDate }
+            // Exclude screen recordings — they have their own category, keeping
+            // the Videos grid consistent with the (non-overlapping) Videos bucket count.
+            return assets.filter {
+                $0.mediaType == 2 && ($0.mediaSubtypes & Self.screenRecordingMask) == 0
+            }
+            .sorted { $0.creationDate > $1.creationDate }
 
         case .photos:
             return assets.filter {
@@ -451,6 +461,7 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
             // Receipt detection requires OCR and is computed by ReceiptInsightService.
             return assets.filter {
                 $0.mediaType == 1 &&
+                !$0.isFavorite &&
                 $0.creationDate < cutoffReceipts
             }
             .sorted { $0.creationDate < $1.creationDate }
@@ -466,7 +477,25 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
                 return isScreenshot || isSmallWebImage
             }
             .sorted { $0.creationDate < $1.creationDate }
+
+        case .lowQuality:
+            // Coarse candidate set; AestheticsInsightService scores each one and
+            // keeps only the genuinely low-quality (blurry/unflattering) photos.
+            return assets.filter {
+                $0.mediaType == 1 &&
+                !$0.isFavorite &&
+                ($0.mediaSubtypes & Self.photoLiveMask) == 0 &&
+                ($0.mediaSubtypes & Self.screenshotMask) == 0
+            }
+            .sorted { $0.creationDate < $1.creationDate }
         }
+    }
+
+    /// Time-proximity clusters of candidate photos (each ≥ 3 shots), used by
+    /// SimilarShotsInsightService as the input for visual (feature-print) refinement.
+    func similarShotClusters(referenceDate: Date = Date()) -> [[IndexedAsset]] {
+        let cutoff = Self.cutoffDate(daysAgo: Self.similarShotsMinAgeDays, referenceDate: referenceDate)
+        return similarShotClusters(maxCutoffDate: cutoff)
     }
 
     private func duplicateCandidates() -> [IndexedAsset] {
@@ -494,6 +523,15 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
     }
 
     private func similarShotCandidates(maxCutoffDate: Date) -> [IndexedAsset] {
+        var result: [IndexedAsset] = []
+        for cluster in similarShotClusters(maxCutoffDate: maxCutoffDate) {
+            let keeperID = Self.preferredKeeper(in: cluster).id
+            result.append(contentsOf: cluster.filter { $0.id != keeperID })
+        }
+        return result
+    }
+
+    private func similarShotClusters(maxCutoffDate: Date) -> [[IndexedAsset]] {
         let candidates = assets.filter {
             $0.mediaType == 1 &&
             $0.creationDate < maxCutoffDate &&
@@ -530,12 +568,7 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
             clusters.append(currentCluster)
         }
 
-        var result: [IndexedAsset] = []
-        for cluster in clusters {
-            let keeperID = Self.preferredKeeper(in: cluster).id
-            result.append(contentsOf: cluster.filter { $0.id != keeperID })
-        }
-        return result
+        return clusters
     }
 
     private static func preferredKeeper(in group: [IndexedAsset]) -> IndexedAsset {

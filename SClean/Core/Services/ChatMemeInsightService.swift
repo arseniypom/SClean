@@ -91,6 +91,10 @@ actor ChatMemeInsightService {
         }
 
         for asset in sortedCandidates {
+            // Stop promptly if the owning task was cancelled (refresh/backgrounding).
+            // Work computed so far is still persisted by the saveCache() below.
+            if Task.isCancelled { break }
+
             if let cached = cache[asset.id],
                cached.lastKnownChangeDate == asset.lastKnownChangeDate {
                 if cached.score >= Self.chatMemeScoreThreshold {
@@ -124,6 +128,86 @@ actor ChatMemeInsightService {
             .sorted { $0.creationDate < $1.creationDate }
     }
 
+    /// Progressive scan: analyzes **every** chat/meme candidate (not just a budget slice),
+    /// in cancellable chunks, invoking `onPartial` with an updated bucket after each chunk.
+    /// Cached (unchanged) assets are skipped for free. Intended to run at a low QoS.
+    func chatMemeBucketProgressive(
+        snapshot: LibraryIndexSnapshot,
+        referenceDate: Date = Date(),
+        chunkSize: Int = 120,
+        onPartial: @Sendable (InsightBucket?) async -> Void
+    ) async {
+        await loadCacheIfNeeded()
+
+        let candidates = snapshot.assets(for: .chatMemeDump, referenceDate: referenceDate)
+        guard !candidates.isEmpty else {
+            await onPartial(nil)
+            return
+        }
+
+        // Screenshots first (highest-confidence), then oldest — matches the fast path.
+        let sortedCandidates = candidates.sorted { lhs, rhs in
+            let lhsScreenshot = (lhs.mediaSubtypes & Self.screenshotMask) != 0
+            let rhsScreenshot = (rhs.mediaSubtypes & Self.screenshotMask) != 0
+            if lhsScreenshot != rhsScreenshot {
+                return lhsScreenshot && !rhsScreenshot
+            }
+            return lhs.creationDate < rhs.creationDate
+        }
+
+        var matchedIDs: Set<String> = []
+        for asset in sortedCandidates {
+            if let cached = cache[asset.id],
+               cached.lastKnownChangeDate == asset.lastKnownChangeDate,
+               cached.score >= Self.chatMemeScoreThreshold {
+                matchedIDs.insert(asset.id)
+            }
+        }
+        await onPartial(Self.makeBucket(from: candidates, matchedIDs: matchedIDs))
+
+        var analyzedSinceEmit = 0
+        var cacheChanged = false
+
+        for asset in sortedCandidates {
+            if Task.isCancelled { break }
+
+            if let cached = cache[asset.id],
+               cached.lastKnownChangeDate == asset.lastKnownChangeDate {
+                continue
+            }
+
+            let score = await computeChatMemeScore(for: asset)
+            cache[asset.id] = ChatMemeSignal(
+                assetID: asset.id,
+                lastKnownChangeDate: asset.lastKnownChangeDate,
+                score: score
+            )
+            cacheChanged = true
+            if score >= Self.chatMemeScoreThreshold {
+                matchedIDs.insert(asset.id)
+            }
+
+            analyzedSinceEmit += 1
+            if analyzedSinceEmit >= chunkSize {
+                analyzedSinceEmit = 0
+                saveCache()
+                cacheChanged = false
+                await onPartial(Self.makeBucket(from: candidates, matchedIDs: matchedIDs))
+                await Task.yield()
+            }
+        }
+
+        if cacheChanged { saveCache() }
+        await onPartial(Self.makeBucket(from: candidates, matchedIDs: matchedIDs))
+    }
+
+    private static func makeBucket(from candidates: [IndexedAsset], matchedIDs: Set<String>) -> InsightBucket? {
+        let matched = candidates.filter { matchedIDs.contains($0.id) }
+        guard matched.count >= minBucketCount else { return nil }
+        let totalBytes = matched.reduce(Int64(0)) { $0 + $1.byteSize }
+        return InsightBucket(category: .chatMemeDump, count: matched.count, totalBytes: totalBytes)
+    }
+
     private func computeChatMemeScore(for asset: IndexedAsset) async -> Double {
         let isScreenshot = (asset.mediaSubtypes & Self.screenshotMask) != 0
         let image = await loadImage(for: asset.id)
@@ -139,24 +223,25 @@ actor ChatMemeInsightService {
             score += 0.6
         }
 
-        if Self.strongKeywords.contains(where: { normalizedText.contains($0) }) {
-            score += 2.0
-        }
-        if Self.mediumKeywords.contains(where: { normalizedText.contains($0) }) {
-            score += 1.1
-        }
-        if Self.linkRegex.firstMatch(in: normalizedText, range: NSRange(location: 0, length: normalizedText.utf16.count)) != nil {
-            score += 0.8
-        }
-        if Self.laughterRegex.firstMatch(in: normalizedText, range: NSRange(location: 0, length: normalizedText.utf16.count)) != nil {
-            score += 0.7
-        }
-        if textData.lineCount >= 4 {
-            score += 0.3
-        }
-        if normalizedText.count >= 60 {
-            score += 0.3
-        }
+        score += Self.chatMemeTextScore(text: normalizedText, lineCount: textData.lineCount)
+        return score
+    }
+
+    /// Pure, testable text-signal scoring for chat/meme detection. The asset-level
+    /// signals (screenshot subtype, small file) are added by the caller.
+    static func chatMemeTextScore(text rawText: String, lineCount: Int) -> Double {
+        let text = rawText.lowercased()
+        guard !text.isEmpty else { return 0 }
+
+        let range = NSRange(text.startIndex..., in: text)
+        var score = 0.0
+
+        if strongKeywords.contains(where: { text.contains($0) }) { score += 2.0 }
+        if mediumKeywords.contains(where: { text.contains($0) }) { score += 1.1 }
+        if linkRegex.firstMatch(in: text, range: range) != nil { score += 0.8 }
+        if laughterRegex.firstMatch(in: text, range: range) != nil { score += 0.7 }
+        if lineCount >= 4 { score += 0.3 }
+        if text.count >= 60 { score += 0.3 }
 
         return score
     }
@@ -173,7 +258,7 @@ actor ChatMemeInsightService {
         request.recognitionLevel = .fast
         request.usesLanguageCorrection = false
         request.minimumTextHeight = 0.012
-        request.recognitionLanguages = ["en-US"]
+        request.recognitionLanguages = ["en-US", "ru-RU"]
 
         let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
         do {
@@ -246,17 +331,21 @@ actor ChatMemeInsightService {
 
     private static let screenshotMask = 0x4
     private static let minBucketCount = 8
-    private static let chatMemeScoreThreshold = 2.8
+    static let chatMemeScoreThreshold = 2.8
 
     private static let strongKeywords = [
         "telegram", "whatsapp", "messenger", "discord", "imessage",
         "message", "messages", "reply", "forwarded", "story", "reel",
-        "meme", "me irl", "when you", "expectation", "reality"
+        "meme", "me irl", "when you", "expectation", "reality",
+        // Russian chat/messenger surface text
+        "переслано", "сообщение", "ответить", "вотсап", "телеграм"
     ]
 
     private static let mediumKeywords = [
         "online", "typing", "delivered", "read", "sent",
-        "lol", "lmao", "haha", "bro", "chat", "group"
+        "lol", "lmao", "haha", "bro", "chat", "group",
+        // Russian
+        "онлайн", "печатает", "был", "вчера", "ахах", "лол"
     ]
 
     private static let linkRegex = try! NSRegularExpression(

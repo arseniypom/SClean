@@ -82,6 +82,10 @@ actor ReceiptInsightService {
         var matchedIDs: Set<String> = []
 
         for asset in candidates {
+            // Stop promptly if the owning task was cancelled (refresh/backgrounding).
+            // Work computed so far is still persisted by the saveCache() below.
+            if Task.isCancelled { break }
+
             if let signal = cache[asset.id],
                signal.lastKnownChangeDate == asset.lastKnownChangeDate {
                 if signal.score >= Self.receiptScoreThreshold {
@@ -114,6 +118,79 @@ actor ReceiptInsightService {
             .sorted { $0.creationDate < $1.creationDate }
     }
 
+    /// Progressive scan: analyzes **every** receipt candidate (not just a budget slice),
+    /// in cancellable chunks, invoking `onPartial` with an updated bucket after each chunk
+    /// so the UI can grow the count live. Cached (unchanged) assets are skipped for free,
+    /// so the second launch emits the full result almost immediately.
+    /// Intended to run at a low QoS in the background.
+    func receiptBucketProgressive(
+        snapshot: LibraryIndexSnapshot,
+        referenceDate: Date = Date(),
+        chunkSize: Int = 120,
+        onPartial: @Sendable (InsightBucket?) async -> Void
+    ) async {
+        await loadCacheIfNeeded()
+
+        let candidates = snapshot.assets(for: .receipts, referenceDate: referenceDate)
+        guard !candidates.isEmpty else {
+            await onPartial(nil)
+            return
+        }
+
+        var matchedIDs: Set<String> = []
+        // Seed from cache so already-known matches surface immediately.
+        for asset in candidates {
+            if let signal = cache[asset.id],
+               signal.lastKnownChangeDate == asset.lastKnownChangeDate,
+               signal.score >= Self.receiptScoreThreshold {
+                matchedIDs.insert(asset.id)
+            }
+        }
+        await onPartial(Self.makeBucket(from: candidates, matchedIDs: matchedIDs))
+
+        var analyzedSinceEmit = 0
+        var cacheChanged = false
+
+        for asset in candidates {
+            if Task.isCancelled { break }
+
+            if let signal = cache[asset.id],
+               signal.lastKnownChangeDate == asset.lastKnownChangeDate {
+                continue // already analyzed this exact version
+            }
+
+            let score = await computeReceiptScore(for: asset.id)
+            cache[asset.id] = ReceiptSignal(
+                assetID: asset.id,
+                lastKnownChangeDate: asset.lastKnownChangeDate,
+                score: score
+            )
+            cacheChanged = true
+            if score >= Self.receiptScoreThreshold {
+                matchedIDs.insert(asset.id)
+            }
+
+            analyzedSinceEmit += 1
+            if analyzedSinceEmit >= chunkSize {
+                analyzedSinceEmit = 0
+                saveCache()
+                cacheChanged = false
+                await onPartial(Self.makeBucket(from: candidates, matchedIDs: matchedIDs))
+                await Task.yield()
+            }
+        }
+
+        if cacheChanged { saveCache() }
+        await onPartial(Self.makeBucket(from: candidates, matchedIDs: matchedIDs))
+    }
+
+    private static func makeBucket(from candidates: [IndexedAsset], matchedIDs: Set<String>) -> InsightBucket? {
+        let matched = candidates.filter { matchedIDs.contains($0.id) }
+        guard !matched.isEmpty else { return nil }
+        let totalBytes = matched.reduce(Int64(0)) { $0 + $1.byteSize }
+        return InsightBucket(category: .receipts, count: matched.count, totalBytes: totalBytes)
+    }
+
     private func computeReceiptScore(for assetID: String) async -> Double {
         guard let image = await loadImage(for: assetID) else { return 0 }
         guard let cgImage = image.cgImage else { return 0 }
@@ -139,34 +216,29 @@ actor ReceiptInsightService {
     }
 
     private func score(forRecognizedText text: String) -> Double {
+        Self.receiptScore(for: text)
+    }
+
+    /// Pure, testable receipt scoring over recognized OCR text.
+    /// A receipt must contain either an explicit receipt term or a monetary amount
+    /// (number with cents or a currency symbol); this gate removes false positives
+    /// from generic screenshots that merely contain a date or a bare number.
+    static func receiptScore(for rawText: String) -> Double {
+        let text = rawText.lowercased()
         guard !text.isEmpty else { return 0 }
 
+        let fullRange = NSRange(text.startIndex..., in: text)
+        let hasStrong = strongKeywords.contains { text.contains($0) }
+        let hasMonetary = monetaryRegex.firstMatch(in: text, range: fullRange) != nil
+
+        guard hasStrong || hasMonetary else { return 0 }
+
         var score = 0.0
-
-        let strongKeywords = [
-            "receipt", "merchant", "subtotal", "vat", "invoice",
-            "чек", "касса", "итог", "сумма", "налог", "безнал"
-        ]
-        let mediumKeywords = [
-            "total", "tax", "card", "cash", "terminal", "store",
-            "руб", "₽", "коп", "оплата", "товар", "покупка"
-        ]
-
-        if strongKeywords.contains(where: { text.contains($0) }) {
-            score += 2.2
-        }
-        if mediumKeywords.contains(where: { text.contains($0) }) {
-            score += 1.2
-        }
-        if Self.amountRegex.firstMatch(in: text, range: NSRange(location: 0, length: text.utf16.count)) != nil {
-            score += 1.4
-        }
-        if Self.dateRegex.firstMatch(in: text, range: NSRange(location: 0, length: text.utf16.count)) != nil {
-            score += 0.9
-        }
-        if text.count > 40 {
-            score += 0.4
-        }
+        if hasStrong { score += 2.2 }
+        if mediumKeywords.contains(where: { text.contains($0) }) { score += 0.8 }
+        if hasMonetary { score += 1.6 }
+        if dateRegex.firstMatch(in: text, range: fullRange) != nil { score += 0.7 }
+        if text.count > 40 { score += 0.3 }
 
         return score
     }
@@ -220,10 +292,23 @@ actor ReceiptInsightService {
         }
     }
 
-    private static let receiptScoreThreshold = 3.2
+    static let receiptScoreThreshold = 3.2
 
-    private static let amountRegex = try! NSRegularExpression(
-        pattern: #"(\d{1,3}([., ]\d{3})*([.,]\d{2})?)"#,
+    private static let strongKeywords = [
+        "receipt", "merchant", "subtotal", "vat", "invoice",
+        "чек", "касса", "итог", "сумма", "налог", "безнал"
+    ]
+
+    private static let mediumKeywords = [
+        "total", "tax", "card", "cash", "terminal", "store",
+        "руб", "₽", "коп", "оплата", "товар", "покупка"
+    ]
+
+    /// Matches a monetary amount: a number with two decimal places (cents) or a
+    /// number preceded by a currency symbol. Deliberately does NOT match bare
+    /// integers like "5 items" or "page 3", which previously produced false positives.
+    private static let monetaryRegex = try! NSRegularExpression(
+        pattern: #"(?:[$€£₽]\s?\d[\d., ]*)|(?:\b\d[\d., ]*[.,]\d{2}\b)"#,
         options: []
     )
 

@@ -90,6 +90,92 @@ actor ExactDuplicateInsightService {
         return analysis.groups
     }
 
+    /// Progressive scan: hashes **every** coarse-duplicate candidate (not just a budget
+    /// slice), in cancellable chunks, invoking `onPartial` with an updated bucket as groups
+    /// finalize. Cached (unchanged) hashes are reused for free. Intended to run at a low QoS.
+    func exactDuplicateBucketProgressive(
+        snapshot: LibraryIndexSnapshot,
+        chunkSize: Int = 150,
+        onPartial: @Sendable (InsightBucket?) async -> Void
+    ) async {
+        await loadCacheIfNeeded()
+
+        let groups = coarseDuplicateGroups(from: snapshot.assets)
+        guard !groups.isEmpty else {
+            await onPartial(nil)
+            return
+        }
+
+        let bytesByID = Dictionary(uniqueKeysWithValues: snapshot.assets.map { ($0.id, $0.byteSize) })
+
+        var groupsOut: [DuplicateGroup] = []
+        var nextGroupIndex = 1
+        var analyzedSinceEmit = 0
+        var cacheChanged = false
+
+        groupLoop: for group in groups {
+            if Task.isCancelled { break }
+
+            var byHash: [String: [IndexedAsset]] = [:]
+            for asset in group {
+                if let cached = cache[asset.id],
+                   cached.lastKnownChangeDate == asset.lastKnownChangeDate {
+                    byHash[cached.quickHash, default: []].append(asset)
+                    continue
+                }
+
+                if Task.isCancelled { break groupLoop }
+                guard let quickHash = await computeQuickHash(for: asset.id) else { continue }
+                cache[asset.id] = HashSignal(
+                    assetID: asset.id,
+                    lastKnownChangeDate: asset.lastKnownChangeDate,
+                    quickHash: quickHash
+                )
+                cacheChanged = true
+                byHash[quickHash, default: []].append(asset)
+
+                analyzedSinceEmit += 1
+                if analyzedSinceEmit >= chunkSize {
+                    analyzedSinceEmit = 0
+                    saveCache()
+                    cacheChanged = false
+                    await onPartial(Self.makeBucket(from: groupsOut, bytesByID: bytesByID))
+                    await Task.yield()
+                }
+            }
+
+            for hashGroup in byHash.values where hashGroup.count >= 2 {
+                let sortedGroup = hashGroup.sorted { $0.creationDate < $1.creationDate }
+                let keeperID = Self.preferredKeeper(in: hashGroup).id
+                groupsOut.append(
+                    DuplicateGroup(
+                        index: nextGroupIndex,
+                        assetIDs: sortedGroup.map(\.id),
+                        keeperID: keeperID
+                    )
+                )
+                nextGroupIndex += 1
+            }
+
+            await onPartial(Self.makeBucket(from: groupsOut, bytesByID: bytesByID))
+        }
+
+        if cacheChanged { saveCache() }
+        await onPartial(Self.makeBucket(from: groupsOut, bytesByID: bytesByID))
+    }
+
+    private static func makeBucket(from groups: [DuplicateGroup], bytesByID: [String: Int64]) -> InsightBucket? {
+        var deletable: Set<String> = []
+        for group in groups {
+            for id in group.assetIDs where id != group.keeperID {
+                deletable.insert(id)
+            }
+        }
+        guard !deletable.isEmpty else { return nil }
+        let totalBytes = deletable.reduce(Int64(0)) { $0 + (bytesByID[$1] ?? 0) }
+        return InsightBucket(category: .exactDuplicates, count: deletable.count, totalBytes: totalBytes)
+    }
+
     // MARK: - Private
 
     private func analyzeDuplicates(
@@ -109,7 +195,11 @@ actor ExactDuplicateInsightService {
         var groupsOut: [DuplicateGroup] = []
         var nextGroupIndex = 1
 
-        for group in groups {
+        groupLoop: for group in groups {
+            // Stop promptly if the owning task was cancelled (refresh/backgrounding).
+            // Hashes computed so far are still persisted by the saveCache() below.
+            if Task.isCancelled { break }
+
             var byHash: [String: [IndexedAsset]] = [:]
 
             for asset in group {
@@ -120,6 +210,7 @@ actor ExactDuplicateInsightService {
                 }
 
                 guard remainingBudget > 0 else { continue }
+                if Task.isCancelled { break groupLoop }
                 remainingBudget -= 1
 
                 guard let quickHash = await computeQuickHash(for: asset.id) else { continue }

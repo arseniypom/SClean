@@ -74,7 +74,9 @@ final class PhotoLibraryService: ObservableObject {
     private var exactDuplicateInsightTask: Task<Void, Never>?
     private var receiptInsightTask: Task<Void, Never>?
     private var chatMemeInsightTask: Task<Void, Never>?
-    
+    private var similarShotsInsightTask: Task<Void, Never>?
+    private var lowQualityInsightTask: Task<Void, Never>?
+
     init(
         indexStore: LibraryIndexStore = .shared,
         indexer: LibraryIndexer? = nil
@@ -97,9 +99,11 @@ final class PhotoLibraryService: ObservableObject {
             typeBuckets = cachedSnapshot.typeBuckets
             insightBuckets = cachedSnapshot.insightBuckets.filter { $0.category != .exactDuplicates }
             currentSnapshot = cachedSnapshot
-            startExactDuplicateInsightRefresh(for: cachedSnapshot, analysisBudget: 220)
-            startReceiptInsightRefresh(for: cachedSnapshot, analysisBudget: 120)
-            startChatMemeInsightRefresh(for: cachedSnapshot, analysisBudget: 140)
+            startExactDuplicateInsightRefresh(for: cachedSnapshot)
+            startReceiptInsightRefresh(for: cachedSnapshot)
+            startChatMemeInsightRefresh(for: cachedSnapshot)
+            startSimilarShotsInsightRefresh(for: cachedSnapshot)
+            startLowQualityInsightRefresh(for: cachedSnapshot)
         } else {
             state = .loading
         }
@@ -131,9 +135,11 @@ final class PhotoLibraryService: ObservableObject {
         monthBuckets = snapshot.monthBuckets
         typeBuckets = snapshot.typeBuckets
         insightBuckets = snapshot.insightBuckets.filter { $0.category != .exactDuplicates }
-        startExactDuplicateInsightRefresh(for: snapshot, analysisBudget: 300)
-        startReceiptInsightRefresh(for: snapshot, analysisBudget: 220)
-        startChatMemeInsightRefresh(for: snapshot, analysisBudget: 250)
+        startExactDuplicateInsightRefresh(for: snapshot)
+        startReceiptInsightRefresh(for: snapshot)
+        startChatMemeInsightRefresh(for: snapshot)
+        startSimilarShotsInsightRefresh(for: snapshot)
+        startLowQualityInsightRefresh(for: snapshot)
 
         let buckets = snapshot.yearBuckets
         if buckets.isEmpty {
@@ -142,12 +148,7 @@ final class PhotoLibraryService: ObservableObject {
             typeBuckets = []
             insightBuckets = []
             currentSnapshot = nil
-            exactDuplicateInsightTask?.cancel()
-            exactDuplicateInsightTask = nil
-            receiptInsightTask?.cancel()
-            receiptInsightTask = nil
-            chatMemeInsightTask?.cancel()
-            chatMemeInsightTask = nil
+            cancelInsightTasks()
         } else {
             state = .loaded(buckets)
         }
@@ -173,47 +174,83 @@ final class PhotoLibraryService: ObservableObject {
     
     func stopObservingChanges() {
         changeObserverWrapper = nil
+        cancelInsightTasks()
+    }
+
+    private func cancelInsightTasks() {
         exactDuplicateInsightTask?.cancel()
         exactDuplicateInsightTask = nil
         receiptInsightTask?.cancel()
         receiptInsightTask = nil
         chatMemeInsightTask?.cancel()
         chatMemeInsightTask = nil
+        similarShotsInsightTask?.cancel()
+        similarShotsInsightTask = nil
+        lowQualityInsightTask?.cancel()
+        lowQualityInsightTask = nil
     }
 
-    private func startExactDuplicateInsightRefresh(for snapshot: LibraryIndexSnapshot, analysisBudget: Int) {
+    // Progressive insight refreshes run at a low QoS and scan the *entire* candidate set,
+    // not just a budget slice, emitting partial buckets as they go so the count grows live.
+    // Persisted per-asset caches make every launch after the first nearly free.
+
+    private func startExactDuplicateInsightRefresh(for snapshot: LibraryIndexSnapshot) {
         exactDuplicateInsightTask?.cancel()
-        exactDuplicateInsightTask = Task { [weak self] in
-            let exactBucket = await ExactDuplicateInsightService.shared.exactDuplicateBucket(
-                snapshot: snapshot,
-                analysisBudget: analysisBudget
-            )
-            guard !Task.isCancelled else { return }
-            await self?.mergeAsyncInsightBucket(exactBucket, category: .exactDuplicates)
+        exactDuplicateInsightTask = Task(priority: .utility) { [weak self] in
+            await ExactDuplicateInsightService.shared.exactDuplicateBucketProgressive(
+                snapshot: snapshot
+            ) { bucket in
+                guard !Task.isCancelled else { return } // superseded by a newer refresh
+                await self?.mergeAsyncInsightBucket(bucket, category: .exactDuplicates)
+            }
         }
     }
 
-    private func startReceiptInsightRefresh(for snapshot: LibraryIndexSnapshot, analysisBudget: Int) {
+    private func startReceiptInsightRefresh(for snapshot: LibraryIndexSnapshot) {
         receiptInsightTask?.cancel()
-        receiptInsightTask = Task { [weak self] in
-            let receiptBucket = await ReceiptInsightService.shared.receiptBucket(
-                snapshot: snapshot,
-                analysisBudget: analysisBudget
-            )
-            guard !Task.isCancelled else { return }
-            await self?.mergeAsyncInsightBucket(receiptBucket, category: .receipts)
+        receiptInsightTask = Task(priority: .utility) { [weak self] in
+            await ReceiptInsightService.shared.receiptBucketProgressive(
+                snapshot: snapshot
+            ) { bucket in
+                guard !Task.isCancelled else { return } // superseded by a newer refresh
+                await self?.mergeAsyncInsightBucket(bucket, category: .receipts)
+            }
         }
     }
 
-    private func startChatMemeInsightRefresh(for snapshot: LibraryIndexSnapshot, analysisBudget: Int) {
+    private func startChatMemeInsightRefresh(for snapshot: LibraryIndexSnapshot) {
         chatMemeInsightTask?.cancel()
-        chatMemeInsightTask = Task { [weak self] in
-            let chatMemeBucket = await ChatMemeInsightService.shared.chatMemeBucket(
-                snapshot: snapshot,
-                analysisBudget: analysisBudget
-            )
-            guard !Task.isCancelled else { return }
-            await self?.mergeAsyncInsightBucket(chatMemeBucket, category: .chatMemeDump)
+        chatMemeInsightTask = Task(priority: .utility) { [weak self] in
+            await ChatMemeInsightService.shared.chatMemeBucketProgressive(
+                snapshot: snapshot
+            ) { bucket in
+                guard !Task.isCancelled else { return } // superseded by a newer refresh
+                await self?.mergeAsyncInsightBucket(bucket, category: .chatMemeDump)
+            }
+        }
+    }
+
+    private func startSimilarShotsInsightRefresh(for snapshot: LibraryIndexSnapshot) {
+        similarShotsInsightTask?.cancel()
+        similarShotsInsightTask = Task(priority: .utility) { [weak self] in
+            await SimilarShotsInsightService.shared.similarShotsBucketProgressive(
+                snapshot: snapshot
+            ) { bucket in
+                guard !Task.isCancelled else { return } // superseded by a newer refresh
+                await self?.mergeAsyncInsightBucket(bucket, category: .similarShots)
+            }
+        }
+    }
+
+    private func startLowQualityInsightRefresh(for snapshot: LibraryIndexSnapshot) {
+        lowQualityInsightTask?.cancel()
+        lowQualityInsightTask = Task(priority: .utility) { [weak self] in
+            await AestheticsInsightService.shared.lowQualityBucketProgressive(
+                snapshot: snapshot
+            ) { bucket in
+                guard !Task.isCancelled else { return } // superseded by a newer refresh
+                await self?.mergeAsyncInsightBucket(bucket, category: .lowQuality)
+            }
         }
     }
 

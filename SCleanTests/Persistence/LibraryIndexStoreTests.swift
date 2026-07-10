@@ -268,6 +268,51 @@ struct LibraryIndexStoreTests {
         #expect(categories == Set([.photos, .videos, .livePhotos, .screenshots, .screenRecordings]))
     }
 
+    @Test func snapshot_typeBuckets_screenRecordingsNotCountedAsRegularVideos() {
+        let date = Date(timeIntervalSince1970: 1_767_225_600)
+        let assets = [
+            TestFactory.indexedAsset(id: "video", byteSize: 10, creationDate: date, lastKnownChangeDate: date, mediaType: 2),
+            TestFactory.indexedAsset(id: "rec", byteSize: 100, creationDate: date, lastKnownChangeDate: date, mediaType: 2, mediaSubtypes: 0x80000)
+        ]
+        let snapshot = TestFactory.librarySnapshot(assets: assets)
+        let buckets = Dictionary(uniqueKeysWithValues: snapshot.typeBuckets.map { ($0.category, $0) })
+
+        // Screen recordings live only in their own bucket — not double counted as videos.
+        #expect(buckets[.videos]?.count == 1)
+        #expect(buckets[.videos]?.totalBytes == 10)
+        #expect(buckets[.screenRecordings]?.count == 1)
+        #expect(buckets[.screenRecordings]?.totalBytes == 100)
+
+        // Per-type byte totals must not overlap (sum equals real library size).
+        let totalBytes = snapshot.typeBuckets.reduce(Int64(0)) { $0 + $1.totalBytes }
+        #expect(totalBytes == 110)
+    }
+
+    @Test func snapshot_assetsForVideos_excludesScreenRecordings() {
+        let date = Date(timeIntervalSince1970: 1_767_225_600)
+        let assets = [
+            TestFactory.indexedAsset(id: "video", creationDate: date, lastKnownChangeDate: date, mediaType: 2),
+            TestFactory.indexedAsset(id: "rec", creationDate: date, lastKnownChangeDate: date, mediaType: 2, mediaSubtypes: 0x80000)
+        ]
+        let snapshot = TestFactory.librarySnapshot(assets: assets)
+
+        let videoIDs = snapshot.assets(for: .videos).map(\.id)
+        #expect(videoIDs == ["video"])
+    }
+
+    @Test func snapshot_assetsForReceipts_excludesFavorites() {
+        let reference = Date(timeIntervalSince1970: 1_767_225_600)
+        let oldDate = reference.addingTimeInterval(-60 * 24 * 60 * 60) // 60 days ago (> 45-day cutoff)
+        let assets = [
+            TestFactory.indexedAsset(id: "receipt", creationDate: oldDate, lastKnownChangeDate: oldDate, mediaType: 1),
+            TestFactory.indexedAsset(id: "fav-receipt", creationDate: oldDate, lastKnownChangeDate: oldDate, mediaType: 1, isFavorite: true)
+        ]
+        let snapshot = TestFactory.librarySnapshot(assets: assets)
+
+        let receiptIDs = snapshot.assets(for: .receipts, referenceDate: reference).map(\.id)
+        #expect(receiptIDs == ["receipt"])
+    }
+
     // MARK: - Insights Tests
 
     @Test func snapshot_insightBuckets_buildsAndSortsBySavings() {
@@ -400,9 +445,9 @@ struct LibraryIndexStoreTests {
     @Test func snapshot_assetsForExactDuplicates_excludesPreferredKeeper() {
         let oldDate = Date(timeIntervalSince1970: 1_746_576_000)
         let assets = [
-            TestFactory.indexedAsset(id: "keep", creationDate: oldDate, lastKnownChangeDate: oldDate, mediaType: 1, isFavorite: true, byteSize: 4 * TestBytes.oneMB),
-            TestFactory.indexedAsset(id: "delete1", creationDate: oldDate.addingTimeInterval(1), lastKnownChangeDate: oldDate, mediaType: 1, byteSize: 4 * TestBytes.oneMB),
-            TestFactory.indexedAsset(id: "delete2", creationDate: oldDate.addingTimeInterval(2), lastKnownChangeDate: oldDate, mediaType: 1, byteSize: 4 * TestBytes.oneMB)
+            TestFactory.indexedAsset(id: "keep", byteSize: 4 * TestBytes.oneMB, creationDate: oldDate, lastKnownChangeDate: oldDate, mediaType: 1, isFavorite: true),
+            TestFactory.indexedAsset(id: "delete1", byteSize: 4 * TestBytes.oneMB, creationDate: oldDate.addingTimeInterval(1), lastKnownChangeDate: oldDate, mediaType: 1),
+            TestFactory.indexedAsset(id: "delete2", byteSize: 4 * TestBytes.oneMB, creationDate: oldDate.addingTimeInterval(2), lastKnownChangeDate: oldDate, mediaType: 1)
         ]
         let snapshot = TestFactory.librarySnapshot(assets: assets)
 
@@ -433,17 +478,49 @@ struct LibraryIndexStoreTests {
         let referenceDate = Date(timeIntervalSince1970: 1_767_225_600)
         let baseDate = Date(timeIntervalSince1970: 1_746_576_000)
         let assets = [
-            TestFactory.indexedAsset(id: "cluster-1", creationDate: baseDate, lastKnownChangeDate: baseDate, mediaType: 1, byteSize: 5 * TestBytes.oneMB),
-            TestFactory.indexedAsset(id: "cluster-2", creationDate: baseDate.addingTimeInterval(2), lastKnownChangeDate: baseDate, mediaType: 1, byteSize: 6 * TestBytes.oneMB),
-            TestFactory.indexedAsset(id: "cluster-3", creationDate: baseDate.addingTimeInterval(4), lastKnownChangeDate: baseDate, mediaType: 1, byteSize: 7 * TestBytes.oneMB),
-            TestFactory.indexedAsset(id: "cluster-4", creationDate: baseDate.addingTimeInterval(6), lastKnownChangeDate: baseDate, mediaType: 1, byteSize: 4 * TestBytes.oneMB),
-            TestFactory.indexedAsset(id: "single", creationDate: baseDate.addingTimeInterval(30), lastKnownChangeDate: baseDate, mediaType: 1, byteSize: 9 * TestBytes.oneMB)
+            TestFactory.indexedAsset(id: "cluster-1", byteSize: 5 * TestBytes.oneMB, creationDate: baseDate, lastKnownChangeDate: baseDate, mediaType: 1),
+            TestFactory.indexedAsset(id: "cluster-2", byteSize: 6 * TestBytes.oneMB, creationDate: baseDate.addingTimeInterval(2), lastKnownChangeDate: baseDate, mediaType: 1),
+            TestFactory.indexedAsset(id: "cluster-3", byteSize: 7 * TestBytes.oneMB, creationDate: baseDate.addingTimeInterval(4), lastKnownChangeDate: baseDate, mediaType: 1),
+            TestFactory.indexedAsset(id: "cluster-4", byteSize: 4 * TestBytes.oneMB, creationDate: baseDate.addingTimeInterval(6), lastKnownChangeDate: baseDate, mediaType: 1),
+            TestFactory.indexedAsset(id: "single", byteSize: 9 * TestBytes.oneMB, creationDate: baseDate.addingTimeInterval(30), lastKnownChangeDate: baseDate, mediaType: 1)
         ]
         let snapshot = TestFactory.librarySnapshot(assets: assets)
 
         let filtered = snapshot.assets(for: .similarShots, referenceDate: referenceDate)
         #expect(filtered.count == 3)
         #expect(!filtered.map(\.id).contains("cluster-3")) // largest in cluster kept
+    }
+
+    @Test func snapshot_similarShotClusters_exposesTimeClustersForVisualRefinement() {
+        let referenceDate = Date(timeIntervalSince1970: 1_767_225_600)
+        let baseDate = Date(timeIntervalSince1970: 1_746_576_000)
+        let assets = [
+            TestFactory.indexedAsset(id: "c1", creationDate: baseDate, lastKnownChangeDate: baseDate, mediaType: 1),
+            TestFactory.indexedAsset(id: "c2", creationDate: baseDate.addingTimeInterval(2), lastKnownChangeDate: baseDate, mediaType: 1),
+            TestFactory.indexedAsset(id: "c3", creationDate: baseDate.addingTimeInterval(4), lastKnownChangeDate: baseDate, mediaType: 1),
+            TestFactory.indexedAsset(id: "single", creationDate: baseDate.addingTimeInterval(60), lastKnownChangeDate: baseDate, mediaType: 1)
+        ]
+        let snapshot = TestFactory.librarySnapshot(assets: assets)
+
+        let clusters = snapshot.similarShotClusters(referenceDate: referenceDate)
+        // One time cluster of 3 (incl. the keeper, unlike assets(for:)); the lone shot is dropped.
+        #expect(clusters.count == 1)
+        #expect(Set(clusters.first?.map(\.id) ?? []) == ["c1", "c2", "c3"])
+    }
+
+    @Test func snapshot_assetsForLowQuality_excludesFavoritesScreenshotsAndLive() {
+        let date = Date(timeIntervalSince1970: 1_767_225_600)
+        let assets = [
+            TestFactory.indexedAsset(id: "photo", creationDate: date, lastKnownChangeDate: date, mediaType: 1),
+            TestFactory.indexedAsset(id: "fav", creationDate: date, lastKnownChangeDate: date, mediaType: 1, isFavorite: true),
+            TestFactory.indexedAsset(id: "shot", creationDate: date, lastKnownChangeDate: date, mediaType: 1, mediaSubtypes: 0x4),
+            TestFactory.indexedAsset(id: "live", creationDate: date, lastKnownChangeDate: date, mediaType: 1, mediaSubtypes: 0x8),
+            TestFactory.indexedAsset(id: "video", creationDate: date, lastKnownChangeDate: date, mediaType: 2)
+        ]
+        let snapshot = TestFactory.librarySnapshot(assets: assets)
+
+        let candidateIDs = snapshot.assets(for: .lowQuality, referenceDate: date).map(\.id)
+        #expect(candidateIDs == ["photo"])
     }
 
     @Test func snapshot_assetsForShortVideos_applies6SecondThreshold() {
