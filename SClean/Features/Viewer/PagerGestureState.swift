@@ -174,6 +174,22 @@ nonisolated struct PagerGestureState: Equatable, Sendable {
         return .cancel
     }
 
+    // MARK: - Top Card Mapping
+    // Shared by the live dragged card and the fly-out snapshot so the
+    // handoff frame is pixel-identical by construction.
+
+    static func topCardScale(progress: CGFloat) -> CGFloat {
+        1 - 0.05 * min(max(progress, 0), 1)
+    }
+
+    static func topCardRotationDegrees(progress: CGFloat) -> Double {
+        6 * Double(min(max(progress, 0), 1))
+    }
+
+    static func topCardOpacity(progress: CGFloat) -> Double {
+        1 - 0.08 * Double(min(max(progress, 0), 1))
+    }
+
     // MARK: - Stack Reveal Mapping
 
     /// Scale of the card behind the current one while trash-dragging:

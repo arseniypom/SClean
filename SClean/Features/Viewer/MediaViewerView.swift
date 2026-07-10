@@ -102,11 +102,8 @@ struct MediaViewerView: View {
             prefetchAdjacent()
             fetchCurrentAssetSize()
         }
-        .onChange(of: deckModel.currentIndex) { _, _ in
-            prefetchAdjacent()
-            fetchCurrentAssetSize()
-        }
-        .onChange(of: deckModel.deck.count) { _, _ in
+        .onChange(of: deckModel.currentAsset?.id) { _, _ in
+            // Covers both page changes and deck mutations (trash/undo)
             prefetchAdjacent()
             fetchCurrentAssetSize()
         }
@@ -329,20 +326,19 @@ struct MediaViewerView: View {
         let endPrefetch = min(deck.count - 1, currentIndex + prefetchRange)
         guard startPrefetch <= endPrefetch else { return }
 
-        var photoWindowIDs: [String] = []
+        var imageWindowIDs: [String] = []
         for index in startPrefetch...endPrefetch {
             let asset = deck[index]
 
-            if asset.mediaType == .video {
-                // Preheat the player item for immediate neighbors so
-                // playback starts instantly when swiped to
-                if index != currentIndex && abs(index - currentIndex) <= 1 {
-                    VideoPreheater.shared.preheat(assetID: asset.id)
-                }
-                continue
+            // Preheat player items for immediate video neighbors so
+            // playback starts instantly when swiped to
+            if asset.isVideo && index != currentIndex && abs(index - currentIndex) <= 1 {
+                VideoPreheater.shared.preheat(assetID: asset.id)
             }
 
-            photoWindowIDs.append(asset.id)
+            // Videos are included in the image window too: their poster
+            // frame powers instant page display and the fly-out snapshot
+            imageWindowIDs.append(asset.id)
             if prefetchTasks[asset.id] == nil {
                 prefetchTasks[asset.id] = Task {
                     _ = await FullImageLoader.shared.loadFullImage(for: asset.id)
@@ -351,10 +347,10 @@ struct MediaViewerView: View {
         }
 
         // Warm PhotoKit's own pipeline for the same window
-        FullImageLoader.shared.updateCachingWindow(assetIDs: photoWindowIDs)
+        FullImageLoader.shared.updateCachingWindow(assetIDs: imageWindowIDs)
 
         // Cancel prefetch for assets outside the window
-        let windowIDs = Set(photoWindowIDs)
+        let windowIDs = Set(imageWindowIDs)
         for (id, task) in prefetchTasks where !windowIDs.contains(id) {
             task.cancel()
             prefetchTasks.removeValue(forKey: id)

@@ -8,7 +8,6 @@
 
 import SwiftUI
 import AVKit
-import Photos
 import Combine
 
 struct VideoPlayerView: View {
@@ -61,9 +60,19 @@ struct VideoPlayerView: View {
                 playButton
             }
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            handleTap()
+        .overlay {
+            // Tap area covers only the central 60% of the page — the outer
+            // edges stay free for the pager's edge-tap navigation, keeping
+            // taps consistent between photo and video pages.
+            GeometryReader { proxy in
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        handleTap()
+                    }
+                    .frame(width: proxy.size.width * 0.6, height: proxy.size.height)
+                    .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+            }
         }
         .overlay(alignment: .bottomTrailing) {
             if isPlaying && isMuted {
@@ -134,16 +143,11 @@ struct VideoPlayerView: View {
 
             guard !Task.isCancelled else { return }
 
-            // Preheated item (instant) or on-demand request.
+            // Preheated item (instant) or on-demand request — one shared path.
             // requestPlayerItem handles slow-mo and edited videos that
             // requestAVAsset returned as AVComposition (previously a false
             // "Unable to load video" error).
-            let playerItem: AVPlayerItem?
-            if let preheated = VideoPreheater.shared.takePlayerItem(for: assetID) {
-                playerItem = preheated
-            } else {
-                playerItem = await requestPlayerItem()
-            }
+            let playerItem = await VideoPreheater.shared.playerItem(for: assetID)
 
             guard !Task.isCancelled else { return }
 
@@ -242,33 +246,6 @@ struct VideoPlayerView: View {
             for: assetID,
             targetSize: CGSize(width: 400, height: 400)
         )
-    }
-
-    private func requestPlayerItem() async -> AVPlayerItem? {
-        let fetchResult = PHAsset.fetchAssets(
-            withLocalIdentifiers: [assetID],
-            options: nil
-        )
-
-        guard let asset = fetchResult.firstObject else {
-            return nil
-        }
-
-        let options = PHVideoRequestOptions()
-        options.isNetworkAccessAllowed = true
-        options.deliveryMode = .automatic
-
-        return await withCheckedContinuation { continuation in
-            var hasResumed = false
-            PHImageManager.default().requestPlayerItem(
-                forVideo: asset,
-                options: options
-            ) { playerItem, _ in
-                guard !hasResumed else { return }
-                hasResumed = true
-                continuation.resume(returning: playerItem)
-            }
-        }
     }
 }
 

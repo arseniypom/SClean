@@ -74,16 +74,15 @@ final class ViewerDeckModel: ObservableObject {
         currentIndex -= 1
     }
 
-    /// Set the current page directly (used by the pager on settle), clamped.
-    func setCurrentIndex(_ index: Int) {
-        guard !deck.isEmpty else {
-            currentIndex = 0
-            return
-        }
-        currentIndex = min(max(index, 0), deck.count - 1)
-    }
-
     // MARK: - Trash / Restore
+
+    /// The asset that will become current if the current one is trashed:
+    /// the next one, or the previous one when the current is last. This is
+    /// the single source of the successor policy — the pager's stack reveal
+    /// and trashCurrent()'s index clamping both follow it.
+    var predictedTrashSuccessor: YearAsset? {
+        asset(at: currentIndex + 1) ?? asset(at: currentIndex - 1)
+    }
 
     /// Trash the current asset: persists via TrashService and removes it
     /// from the deck. The next asset naturally takes the current index

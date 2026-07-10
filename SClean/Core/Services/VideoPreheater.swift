@@ -40,13 +40,9 @@ final class VideoPreheater {
         evictIfNeeded()
         guard entries[assetID] != nil else { return }
 
-        let options = PHVideoRequestOptions()
-        options.isNetworkAccessAllowed = true
-        options.deliveryMode = .automatic
-
         let requestID = PHImageManager.default().requestPlayerItem(
             forVideo: asset,
-            options: options
+            options: Self.makeRequestOptions()
         ) { playerItem, _ in
             Task { @MainActor in
                 let preheater = VideoPreheater.shared
@@ -70,6 +66,32 @@ final class VideoPreheater {
         return playerItem
     }
 
+    /// The single request path for playback: the preheated item when ready,
+    /// otherwise a fresh request with identical options — so both paths
+    /// always produce the same video quality/configuration.
+    func playerItem(for assetID: String) async -> AVPlayerItem? {
+        // A preheated item can have died in the pool (network drop mid-preheat,
+        // stale streaming URL) — fall back to a fresh request in that case.
+        if let preheated = takePlayerItem(for: assetID), preheated.status != .failed {
+            return preheated
+        }
+
+        let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil)
+        guard let asset = fetchResult.firstObject else { return nil }
+
+        return await withCheckedContinuation { continuation in
+            var hasResumed = false
+            PHImageManager.default().requestPlayerItem(
+                forVideo: asset,
+                options: Self.makeRequestOptions()
+            ) { playerItem, _ in
+                guard !hasResumed else { return }
+                hasResumed = true
+                continuation.resume(returning: playerItem)
+            }
+        }
+    }
+
     /// Cancel all pending preheat requests and drop prepared items.
     func cancelAll() {
         for entry in entries.values {
@@ -82,6 +104,13 @@ final class VideoPreheater {
     }
 
     // MARK: - Private
+
+    private static func makeRequestOptions() -> PHVideoRequestOptions {
+        let options = PHVideoRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .automatic
+        return options
+    }
 
     private func evictIfNeeded() {
         while order.count > maxEntries {

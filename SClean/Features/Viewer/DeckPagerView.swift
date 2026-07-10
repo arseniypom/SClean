@@ -43,6 +43,12 @@ struct DeckPagerView: View {
     private static let tapMaxDuration: TimeInterval = 0.25
     /// Haptic hysteresis around the trash threshold (points)
     private static let thresholdHysteresis: CGFloat = 3
+    /// Reused for all per-frame and compensation writes that must not animate
+    private static let noAnimation: Transaction = {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        return transaction
+    }()
 
     // MARK: - Hot-Path Gesture State
     // All per-frame values are local @State so the toolbar/counter in the
@@ -57,8 +63,10 @@ struct DeckPagerView: View {
     @State private var trashTopID: String?
     @State private var trashBehindID: String?
     @State private var flyingCards: [FlyingCard] = []
-    @State private var videoSnapshot: UIImage?
     @State private var hasCrossedThreshold = false
+    /// Frames left of eased writes after re-grabbing a card mid-cancel-spring,
+    /// so the card catches up to the finger instead of teleporting
+    @State private var trashRegrabBlendFrames = 0
     @State private var impactGenerator: UIImpactFeedbackGenerator?
     @State private var touchStartDate: Date?
     @State private var presentedOffset = PresentedOffset()
@@ -113,6 +121,28 @@ struct DeckPagerView: View {
             )
         }
         .coordinateSpace(name: "deckPagerSpace")
+        .onDisappear {
+            // A drag can be cancelled without onEnded (navigation push,
+            // system interruption) — never leave the pager mid-gesture.
+            resetGestureState()
+        }
+    }
+
+    /// Snap all gesture-driven state back to rest without animation.
+    private func resetGestureState() {
+        gesture.reset()
+        touchStartDate = nil
+        pagingBaseX = 0
+        hasCrossedThreshold = false
+        impactGenerator = nil
+        withTransaction(Self.noAnimation) {
+            dragX = 0
+            dragY = 0
+            trashProgress = 0
+            trashTopID = nil
+            trashBehindID = nil
+            flyingCards.removeAll()
+        }
     }
 
     // MARK: - Pages
@@ -158,8 +188,8 @@ struct DeckPagerView: View {
                 }
             }
             .scaleEffect(cardScale(isTopCard: isTopCard, isBehindCard: isBehindCard))
-            .rotationEffect(.degrees(isTopCard ? 6 * trashProgress : 0))
-            .opacity(isTopCard ? 1 - 0.08 * trashProgress : 1)
+            .rotationEffect(.degrees(isTopCard ? PagerGestureState.topCardRotationDegrees(progress: trashProgress) : 0))
+            .opacity(isTopCard ? PagerGestureState.topCardOpacity(progress: trashProgress) : 1)
             .offset(
                 x: isBehindCard || isTopCard ? 0 : baseX,
                 y: isTopCard ? dragY : 0
@@ -171,7 +201,7 @@ struct DeckPagerView: View {
 
     private func cardScale(isTopCard: Bool, isBehindCard: Bool) -> CGFloat {
         if isTopCard {
-            return 1 - 0.05 * trashProgress
+            return PagerGestureState.topCardScale(progress: trashProgress)
         }
         if isBehindCard {
             return PagerGestureState.behindCardScale(progress: trashProgress)
@@ -247,18 +277,23 @@ struct DeckPagerView: View {
     private func handleDragChanged(_ value: DragGesture.Value, size: CGSize) {
         if touchStartDate == nil {
             touchStartDate = value.time
+            // A previous drag that was cancelled by the system never got
+            // onEnded — recover before treating this as a fresh gesture.
+            if gesture.axis != .undecided {
+                resetGestureState()
+                touchStartDate = value.time
+            }
         }
 
         let previousAxis = gesture.axis
         let axis = gesture.update(translation: value.translation)
         if axis != previousAxis {
-            axisDidLock(axis, size: size)
+            axisDidLock(axis)
         }
 
         // Per-frame writes must never pick up implicit animations — nothing
         // is allowed to fight the finger.
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
+        let transaction = Self.noAnimation
 
         switch axis {
         case .undecided:
@@ -280,15 +315,27 @@ struct DeckPagerView: View {
 
         case .trashing:
             let upward = -value.translation.height
-            withTransaction(transaction) {
-                dragY = PagerGestureState.trashOffset(forUpwardTranslation: upward)
-                trashProgress = PagerGestureState.trashProgress(forUpwardTranslation: upward)
+            let newDragY = PagerGestureState.trashOffset(forUpwardTranslation: upward)
+            let newProgress = PagerGestureState.trashProgress(forUpwardTranslation: upward)
+            if trashRegrabBlendFrames > 0 {
+                // Card was caught mid-cancel-spring: ease toward the finger
+                // for a few frames instead of snapping to the new translation
+                trashRegrabBlendFrames -= 1
+                withAnimation(.easeOut(duration: 0.12)) {
+                    dragY = newDragY
+                    trashProgress = newProgress
+                }
+            } else {
+                withTransaction(transaction) {
+                    dragY = newDragY
+                    trashProgress = newProgress
+                }
             }
             updateThresholdHaptics(upward: upward)
         }
     }
 
-    private func axisDidLock(_ axis: PagerGestureState.Axis, size: CGSize) {
+    private func axisDidLock(_ axis: PagerGestureState.Axis) {
         switch axis {
         case .undecided:
             break
@@ -296,6 +343,7 @@ struct DeckPagerView: View {
         case .paging:
             // Continue from the presented position if a settle is in flight
             pagingBaseX = presentedOffset.value
+            clearRevealResidue()
 
         case .trashing:
             guard let current = deckModel.currentAsset else {
@@ -308,17 +356,22 @@ struct DeckPagerView: View {
             impactGenerator = generator
             hasCrossedThreshold = false
 
-            trashTopID = current.id
-            let behindIndex = deckModel.currentIndex + 1 < deckModel.deck.count
-                ? deckModel.currentIndex + 1
-                : deckModel.currentIndex - 1
-            trashBehindID = deckModel.asset(at: behindIndex)?.id
+            // Re-grabbing the same card mid-cancel-spring: blend to the finger
+            trashRegrabBlendFrames = trashTopID == current.id ? 6 : 0
 
-            // Videos aren't in the image cache — grab a poster for the
-            // fly-out snapshot while the drag is still in progress.
-            if current.isVideo && videoSnapshot == nil {
-                captureVideoSnapshot(assetID: current.id, size: size)
-            }
+            trashTopID = current.id
+            trashBehindID = deckModel.predictedTrashSuccessor?.id
+        }
+    }
+
+    /// After a commit, the reveal animation may still be running when the user
+    /// starts paging. The revealed card must stop being pinned to center
+    /// (stale trashBehindID would render it OVER the newly navigated page).
+    private func clearRevealResidue() {
+        guard trashTopID == nil, trashBehindID != nil else { return }
+        trashBehindID = nil
+        withTransaction(Self.noAnimation) {
+            trashProgress = 0
         }
     }
 
@@ -359,9 +412,7 @@ struct DeckPagerView: View {
         // The index change and the dragX compensation cancel out visually, so
         // ALL motion lives in the animated dragX → 0. This keeps the presented
         // offset in one property, which makes mid-settle grabs seamless.
-        var noAnimation = Transaction()
-        noAnimation.disablesAnimations = true
-        withTransaction(noAnimation) {
+        withTransaction(Self.noAnimation) {
             switch action {
             case .advance:
                 deckModel.goNext()
@@ -408,7 +459,6 @@ struct DeckPagerView: View {
                 if gesture.axis != .trashing {
                     trashTopID = nil
                     trashBehindID = nil
-                    videoSnapshot = nil
                 }
             }
         }
@@ -425,30 +475,27 @@ struct DeckPagerView: View {
         impactGenerator = nil
         hasCrossedThreshold = false
 
-        // 1. Snapshot the flying card from the best available representation
-        let snapshotImage = current.isVideo
-            ? videoSnapshot
-            : FullImageLoader.shared.getDisplayableImage(for: current.id)
+        // 1. Snapshot the flying card. Videos get their poster from the same
+        //    image pipeline (prefetch warms it for the whole window), so this
+        //    is media-type agnostic.
+        let snapshotImage = FullImageLoader.shared.getDisplayableImage(for: current.id)
         let commitProgress = trashProgress
         let startOffsetY = dragY
         let card = FlyingCard(
             id: current.id,
             image: snapshotImage,
             startOffsetY: startOffsetY,
-            startScale: 1 - 0.05 * commitProgress,
-            startRotation: 6 * commitProgress,
-            startOpacity: 1 - 0.08 * Double(commitProgress),
+            startScale: PagerGestureState.topCardScale(progress: commitProgress),
+            startRotation: PagerGestureState.topCardRotationDegrees(progress: commitProgress),
+            startOpacity: PagerGestureState.topCardOpacity(progress: commitProgress),
             progress: 0
         )
-        videoSnapshot = nil
 
         // 2. Mutate state synchronously — counter, badge and deck update now
         guard let removed = deckModel.trashCurrent() else { return }
         trashTopID = nil
 
-        var noAnimation = Transaction()
-        noAnimation.disablesAnimations = true
-        withTransaction(noAnimation) {
+        withTransaction(Self.noAnimation) {
             dragY = 0
             flyingCards.append(card)
         }
@@ -461,7 +508,7 @@ struct DeckPagerView: View {
             // Skip cleanup if a new trash drag took over mid-reveal
             if gesture.axis != .trashing {
                 trashBehindID = nil
-                withTransaction(noAnimation) {
+                withTransaction(Self.noAnimation) {
                     trashProgress = 0
                 }
             }
@@ -495,18 +542,17 @@ struct DeckPagerView: View {
 
         let edgeZone = size.width * 0.2
         let pageSpan = size.width + Self.pageGap
-        var noAnimation = Transaction()
-        noAnimation.disablesAnimations = true
+        clearRevealResidue()
 
         if value.startLocation.x < edgeZone {
             guard deckModel.currentIndex > 0 else { return }
-            withTransaction(noAnimation) {
+            withTransaction(Self.noAnimation) {
                 deckModel.goPrevious()
                 dragX -= pageSpan
             }
         } else if value.startLocation.x > size.width - edgeZone {
             guard deckModel.currentIndex < deckModel.deck.count - 1 else { return }
-            withTransaction(noAnimation) {
+            withTransaction(Self.noAnimation) {
                 deckModel.goNext()
                 dragX += pageSpan
             }
@@ -535,20 +581,6 @@ struct DeckPagerView: View {
         }
     }
 
-    // MARK: - Video Snapshot
-
-    private func captureVideoSnapshot(assetID: String, size: CGSize) {
-        Task {
-            let scale = UIScreen.main.scale
-            let snapshot = await ThumbnailLoader.shared.loadThumbnail(
-                for: assetID,
-                targetSize: CGSize(width: size.width * scale, height: size.height * scale)
-            )
-            if trashTopID == assetID {
-                videoSnapshot = snapshot
-            }
-        }
-    }
 }
 
 // MARK: - Preview

@@ -24,9 +24,11 @@ final class FullImageLoader {
     private let requestOptions: PHImageRequestOptions
     private let targetSize: CGSize
 
-    // In-memory LRU cache of final (full-quality, display-prepared) images
+    // In-memory LRU cache of final (full-quality, display-prepared) images.
+    // 14 ≈ the ±2 prefetch window plus fast-swipe headroom; higher caps risk
+    // jetsam on low-RAM devices (each entry is a decoded full-screen bitmap).
     private var cache: [String: UIImage] = [:]
-    private let maxCacheSize = 24
+    private let maxCacheSize = 14
     private var cacheOrder: [String] = []
 
     // Small cache of degraded (fast preview) images, used to avoid spinner

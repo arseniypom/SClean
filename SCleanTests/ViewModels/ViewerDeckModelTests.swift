@@ -187,14 +187,22 @@ struct ViewerDeckModelTests {
         #expect(model.currentIndex == 2)
     }
 
-    @Test func setCurrentIndex_clampsToDeckBounds() async throws {
-        let (model, _, _) = makeModel(assetCount: 3)
+    @Test func predictedTrashSuccessor_matchesWhatTrashCurrentReveals() async throws {
+        let (model, assets, _) = makeModel(assetCount: 3, startIndex: 0)
 
-        model.setCurrentIndex(99)
-        #expect(model.currentIndex == 2)
+        // Mid-deck: successor is the next asset
+        #expect(model.predictedTrashSuccessor?.id == assets[1].id)
+        model.trashCurrent()
+        #expect(model.currentAsset?.id == assets[1].id)
 
-        model.setCurrentIndex(-5)
-        #expect(model.currentIndex == 0)
+        // Last item: successor falls back to the previous asset
+        model.goNext()
+        #expect(model.predictedTrashSuccessor?.id == assets[1].id)
+        model.trashCurrent()
+        #expect(model.currentAsset?.id == assets[1].id)
+
+        // Only item: no successor
+        #expect(model.predictedTrashSuccessor == nil)
     }
 
     // MARK: - Reconciliation
