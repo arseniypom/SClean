@@ -182,9 +182,11 @@ nonisolated struct PagerGestureState: Equatable, Sendable {
         0.90 + 0.10 * easeOutCubic(min(max(progress, 0), 1))
     }
 
-    /// Dim overlay opacity on the behind card: 0.75 at rest, 0 at full progress.
+    /// Dim overlay opacity on the behind card: fully hidden (1.0) at rest so
+    /// entering/leaving the trash drag is seamless, brightening quickly with
+    /// progress as the card is revealed.
     static func behindCardDim(progress: CGFloat) -> CGFloat {
-        0.75 * (1 - min(max(progress, 0), 1))
+        1 - easeOutCubic(min(max(progress, 0), 1))
     }
 
     static func easeOutCubic(_ x: CGFloat) -> CGFloat {

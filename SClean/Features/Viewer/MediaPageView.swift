@@ -10,9 +10,7 @@ import SwiftUI
 struct MediaPageView: View {
     let asset: YearAsset
     let isCurrentPage: Bool
-    let isTrashed: Bool
-    let onUndoTrash: (() -> Void)?
-    
+
     @State private var image: UIImage?
     @State private var isFinalImage: Bool
     @State private var isLoading: Bool
@@ -21,14 +19,10 @@ struct MediaPageView: View {
 
     init(
         asset: YearAsset,
-        isCurrentPage: Bool,
-        isTrashed: Bool = false,
-        onUndoTrash: (() -> Void)? = nil
+        isCurrentPage: Bool
     ) {
         self.asset = asset
         self.isCurrentPage = isCurrentPage
-        self.isTrashed = isTrashed
-        self.onUndoTrash = onUndoTrash
 
         // Pre-populate from cache to avoid loading state flash (blink/shift bug fix)
         // Each page is a fresh view identity with new @State, so without this the
@@ -84,9 +78,6 @@ struct MediaPageView: View {
             if isCurrent && !isFinalImage && asset.mediaType != .video {
                 loadImage()
             }
-        }
-        .overlay {
-            trashedOverlay
         }
     }
     
@@ -151,49 +142,6 @@ struct MediaPageView: View {
                 .foregroundStyle(.white.opacity(0.7))
         }
         .accessibilityLabel("Can't load this item. Swipe to skip.")
-    }
-    
-    // MARK: - Trashed Overlay
-
-    @ViewBuilder
-    private var trashedOverlay: some View {
-        if isTrashed, let onUndoTrash {
-            VStack(spacing: Spacing.md) {
-                Image(systemName: "trash")
-                    .font(.system(size: 24, weight: .medium))
-
-                VStack(spacing: Spacing.xs) {
-                    Text("Marked for deletion")
-                        .font(Typography.headline)
-
-                    Text("This item will be removed when you empty the Trash.")
-                        .font(Typography.caption1)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-
-                Button {
-                    withAnimation(.easeOut(duration: AnimationDuration.fast)) {
-                        onUndoTrash()
-                    }
-                } label: {
-                    HStack(spacing: Spacing.xs) {
-                        Image(systemName: "arrow.uturn.backward")
-                            .font(.system(size: 14, weight: .semibold))
-                        Text("Undo")
-                            .font(Typography.headline)
-                    }
-                    .padding(.vertical, Spacing.sm)
-                    .padding(.horizontal, Spacing.lg)
-                    .background(.fill.tertiary)
-                    .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(Spacing.lg)
-            .frame(maxWidth: 280)
-            .scControlSurface()
-        }
     }
     
     // MARK: - Image Loading

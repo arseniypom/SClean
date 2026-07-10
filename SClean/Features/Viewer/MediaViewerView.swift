@@ -2,7 +2,8 @@
 //  MediaViewerView.swift
 //  SClean
 //
-//  Full-screen paging viewer for photos and videos with swipe-to-trash
+//  Full-screen viewer for photos and videos with swipe-to-trash,
+//  driven by the custom DeckPagerView.
 //
 
 import SwiftUI
@@ -15,56 +16,24 @@ struct MediaViewerView: View {
     @ObservedObject var permissionService: PhotoPermissionService
 
     @StateObject private var trashService = TrashService.shared
-    @StateObject private var animationState: SwipeToTrashAnimationState
+    @StateObject private var deckModel: ViewerDeckModel
     @State private var prefetchTasks: [String: Task<Void, Never>] = [:]
-    @State private var isTabSelectionLocked = false
     @State private var toast: ToastData?
     @State private var showOnboarding: Bool
     @State private var currentAssetSize: Int64?
-    @State private var currentPageGlobalFrame: CGRect = .zero
-    @State private var previewPageGlobalFrame: CGRect = .zero
-    @State private var lastLoggedCurrentPageFrame: CGRect = .zero
-    @State private var lastLoggedPreviewFrame: CGRect = .zero
     @Environment(\.dismiss) private var dismiss
 
     /// Number of items to prefetch in each direction
     private let prefetchRange = 2
-
-    /// Computed accessor for current index (maintained by animation state)
-    private var currentIndex: Int {
-        get { animationState.currentIndex }
-    }
-
-    /// Current asset for the active page
-    private var currentAsset: YearAsset? {
-        guard currentIndex < assets.count else { return nil }
-        return assets[currentIndex]
-    }
-
-    /// Assets that haven't been trashed
-    private var visibleAssets: [YearAsset] {
-        assets.filter { !trashService.isTrashed($0.id) }
-    }
-
-    /// Current visible index (accounting for trashed items)
-    private var currentVisibleIndex: Int {
-        // Find the position of current asset in visible list
-        guard let currentAsset else { return 0 }
-        return visibleAssets.firstIndex(where: { $0.id == currentAsset.id }) ?? 0
-    }
-
-    /// Whether the active page is already in the in-app trash
-    private var isCurrentAssetTrashed: Bool {
-        guard let currentAsset else { return false }
-        return trashService.isTrashed(currentAsset.id)
-    }
 
     init(assets: [YearAsset], startIndex: Int, year: Int, permissionService: PhotoPermissionService) {
         self.assets = assets
         self.startIndex = startIndex
         self.year = year
         self.permissionService = permissionService
-        self._animationState = StateObject(wrappedValue: SwipeToTrashAnimationState(currentIndex: startIndex))
+        self._deckModel = StateObject(
+            wrappedValue: ViewerDeckModel(assets: assets, startIndex: startIndex)
+        )
         // Check all legacy keys for migration
         let hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "SClean.hasCompletedViewerOnboarding") ||
             UserDefaults.standard.bool(forKey: "SlideClean.hasSeenBrowseHint") ||
@@ -79,8 +48,9 @@ struct MediaViewerView: View {
             Color.black
                 .ignoresSafeArea()
 
-            if visibleAssets.isEmpty {
+            if deckModel.isEmpty {
                 doneView
+                    .transition(.opacity)
             } else {
                 pagingContent
             }
@@ -90,6 +60,7 @@ struct MediaViewerView: View {
                 accessChangedOverlay
             }
         }
+        .animation(.easeInOut(duration: 0.25), value: deckModel.isEmpty)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
@@ -126,27 +97,22 @@ struct MediaViewerView: View {
         }
         .statusBarHidden(false)
         .onAppear {
-            swipeDebugLog("onAppear startIndex=\(startIndex) currentIndex=\(animationState.currentIndex) assets=\(assets.count)")
+            // Picks up restores and permanent deletions made on the Trash screen
+            deckModel.reconcileWithTrashService()
             prefetchAdjacent()
             fetchCurrentAssetSize()
         }
-        .onChange(of: animationState.currentIndex) { oldIndex, newIndex in
-            swipeDebugLog("currentIndex changed \(oldIndex) -> \(newIndex) isAnimating=\(animationState.isAnimating) previewID=\(animationState.previewAssetID ?? "nil")")
-            logFrameDelta(context: "onChange(currentIndex)")
-
+        .onChange(of: deckModel.currentIndex) { _, _ in
             prefetchAdjacent()
             fetchCurrentAssetSize()
-
-            DispatchQueue.main.async {
-                logFrameDelta(context: "onChange(currentIndex) + nextRunLoop")
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                logFrameDelta(context: "onChange(currentIndex) + 120ms")
-            }
+        }
+        .onChange(of: deckModel.deck.count) { _, _ in
+            prefetchAdjacent()
+            fetchCurrentAssetSize()
         }
         .onDisappear {
-            swipeDebugLog("onDisappear currentIndex=\(animationState.currentIndex)")
             cancelAllPrefetch()
+            VideoPreheater.shared.cancelAll()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             permissionService.refreshStatus()
@@ -159,172 +125,36 @@ struct MediaViewerView: View {
 
     // MARK: - Paging Content
 
-    /// Binding for TabView selection that syncs with animation state
-    private var currentIndexBinding: Binding<Int> {
-        Binding(
-            get: { animationState.currentIndex },
-            set: { newValue in
-                // Prevent TabView from applying a stale page-change event from
-                // the same drag that just committed swipe-to-trash.
-                guard !isTabSelectionLocked else {
-                    swipeDebugLog("TabView selection ignored due to lock: current=\(animationState.currentIndex) requested=\(newValue)")
-                    return
+    private var pagingContent: some View {
+        DeckPagerView(
+            deckModel: deckModel,
+            onTrashCommitted: { removed in
+                toast = ToastData(message: "Moved to Trash (not deleted)") {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                        deckModel.restore(removed)
+                    }
                 }
-                swipeDebugLog("TabView selection set: \(animationState.currentIndex) -> \(newValue)")
-                animationState.currentIndex = newValue
             }
         )
-    }
-
-    private var pagingContent: some View {
-        ZStack {
-            Color.black
-
-            // Main TabView
-            TabView(selection: currentIndexBinding) {
-                ForEach(Array(assets.enumerated()), id: \.element.id) { index, asset in
-                    pageView(for: index, asset: asset)
-                        .tag(index)
-                }
-            }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            .zIndex(1)
-        }
         .ignoresSafeArea()
-        .contentShape(Rectangle())
-        .onTapGesture { location in
-            handleEdgeTap(at: location)
-        }
-    }
-
-    private func pageView(for index: Int, asset: YearAsset) -> some View {
-        let isTrashed = trashService.isTrashed(asset.id)
-        let nextAsset = findNextVisibleAsset(from: index)
-        let showInlinePreview =
-            index == currentIndex &&
-            animationState.isAnimating &&
-            animationState.previewAssetID == nextAsset?.id
-
-        return ZStack {
-            if showInlinePreview, let nextAsset {
-                MediaPageView(
-                    asset: nextAsset,
-                    isCurrentPage: false,
-                    isTrashed: false
-                )
-                .allowsHitTesting(false)
-                .zIndex(0)
-                .background {
-                    GeometryReader { proxy in
-                        let frame = proxy.frame(in: .global)
-                        Color.clear
-                            .onAppear {
-                                updatePreviewFrame(frame, reason: "inline preview appear id=\(nextAsset.id)")
-                            }
-                            .onChange(of: frame) { _, newFrame in
-                                updatePreviewFrame(newFrame, reason: "inline preview frame changed id=\(nextAsset.id)")
-                            }
-                    }
-                }
-                .onDisappear {
-                    swipeDebugLog("inline preview disappear id=\(nextAsset.id) lastPreviewFrame=\(frameString(previewPageGlobalFrame))")
-                    previewPageGlobalFrame = .zero
-                }
-            }
-
-            MediaPageView(
-                asset: asset,
-                isCurrentPage: index == currentIndex,
-                isTrashed: isTrashed
-            ) {
-                trashService.restore(asset.id)
-            }
-            .zIndex(1)
-            .swipeToTrash(
-                isEnabled: !isTrashed,
-                onDragStart: {
-                    isTabSelectionLocked = true
-                    swipeDebugLog("dragStart index=\(index) asset=\(asset.id) nextAsset=\(nextAsset?.id ?? "nil") currentFrame=\(frameString(currentPageGlobalFrame))")
-                    // Show preview of next photo underneath
-                    if let next = nextAsset {
-                        animationState.startAnimation(nextAssetID: next.id)
-                    }
-                },
-                onDragProgress: { progress in
-                    animationState.updateDragProgress(progress)
-                },
-                onDragCancel: {
-                    swipeDebugLog("dragCancel index=\(index) asset=\(asset.id) currentFrame=\(frameString(currentPageGlobalFrame)) previewFrame=\(frameString(previewPageGlobalFrame))")
-                    animationState.cancelAnimation()
-                    isTabSelectionLocked = false
-                },
-                onTrash: {
-                    swipeDebugLog("onTrash callback index=\(index) asset=\(asset.id) currentFrame=\(frameString(currentPageGlobalFrame)) previewFrame=\(frameString(previewPageGlobalFrame))")
-                    trashItem(at: index)
-                }
-            )
-        }
-        .background {
-            GeometryReader { proxy in
-                let frame = proxy.frame(in: .global)
-                Color.clear
-                    .onAppear {
-                        if index == currentIndex {
-                            updateCurrentPageFrame(frame, reason: "current page appear index=\(index) asset=\(asset.id)")
-                        }
-                    }
-                    .onChange(of: frame) { _, newFrame in
-                        if index == currentIndex {
-                            updateCurrentPageFrame(newFrame, reason: "current page frame changed index=\(index) asset=\(asset.id)")
-                        }
-                    }
-                    .onChange(of: currentIndex) { _, newCurrentIndex in
-                        if index == newCurrentIndex {
-                            updateCurrentPageFrame(frame, reason: "page became current index=\(index) asset=\(asset.id)")
-                        }
-                    }
-            }
-        }
-        .accessibilityIdentifier(index == currentIndex ? "currentPhotoView" : "photoView_\(index)")
-    }
-
-    /// Find the next visible (non-trashed) asset from a given index
-    private func findNextVisibleAsset(from index: Int) -> YearAsset? {
-        // Try forward first
-        for i in (index + 1)..<assets.count {
-            if !trashService.isTrashed(assets[i].id) {
-                return assets[i]
-            }
-        }
-        // Then try backward
-        for i in stride(from: index - 1, through: 0, by: -1) {
-            if !trashService.isTrashed(assets[i].id) {
-                return assets[i]
-            }
-        }
-        return nil
     }
 
     // MARK: - Counter View
 
     private var counterView: some View {
         VStack(spacing: 2) {
-            if visibleAssets.isEmpty {
+            if deckModel.isEmpty {
                 Text("Done")
                     .font(Typography.subheadline)
                     .foregroundStyle(.white.opacity(0.9))
-            } else if isCurrentAssetTrashed {
-                Text("Marked for deletion")
-                    .font(Typography.subheadline)
-                    .foregroundStyle(.white.opacity(0.9))
             } else {
-                Text("\(currentVisibleIndex + 1) / \(visibleAssets.count)")
+                Text("\(deckModel.currentIndex + 1) / \(deckModel.deck.count)")
                     .font(Typography.subheadline)
                     .foregroundStyle(.white.opacity(0.9))
                     .monospacedDigit()
 
                 // Metadata line: date and size
-                if let asset = currentAsset {
+                if let asset = deckModel.currentAsset {
                     metadataText(for: asset)
                 }
             }
@@ -368,7 +198,8 @@ struct MediaViewerView: View {
 
     private func fetchCurrentAssetSize() {
         currentAssetSize = nil
-        guard let asset = currentAsset else { return }
+        guard let asset = deckModel.currentAsset else { return }
+        let deckModel = self.deckModel
 
         Task.detached(priority: .userInitiated) {
             let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [asset.id], options: nil)
@@ -384,7 +215,7 @@ struct MediaViewerView: View {
 
             await MainActor.run {
                 // Only update if still on the same asset
-                if self.currentAsset?.id == asset.id {
+                if deckModel.currentAsset?.id == asset.id {
                     self.currentAssetSize = totalSize > 0 ? totalSize : nil
                 }
             }
@@ -484,123 +315,47 @@ struct MediaViewerView: View {
         .ignoresSafeArea()
     }
 
-    // MARK: - Trash Actions
-
-    private func trashItem(at index: Int) {
-        guard index < assets.count else { return }
-
-        let asset = assets[index]
-        let assetID = asset.id
-
-        // Find next visible BEFORE trashing (while current item is still "visible")
-        let nextIndex = nextVisibleIndex(from: index)
-        swipeDebugLog("trashItem start index=\(index) asset=\(assetID) nextIndex=\(nextIndex.map(String.init) ?? "nil")")
-        logFrameDelta(context: "trashItem(before trash)")
-
-        // Trash the item
-        trashService.trash(assetID)
-
-        // Show undo toast
-        toast = ToastData(message: "Moved to Trash (not deleted)") {
-            trashService.restore(assetID)
-        }
-
-        // Advance to next visible using animation state
-        if let nextIndex {
-            swipeDebugLog("completeAnimation(nextIndex: \(nextIndex))")
-            animationState.completeAnimation(nextIndex: nextIndex)
-        } else {
-            // No more visible items - reset animation state
-            swipeDebugLog("animationState.reset() (no next visible asset)")
-            animationState.reset()
-        }
-
-        logFrameDelta(context: "trashItem(after complete/reset)")
-        DispatchQueue.main.async {
-            logFrameDelta(context: "trashItem + nextRunLoop")
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-            logFrameDelta(context: "trashItem + 120ms")
-        }
-
-        // Unlock on next runloop to ignore trailing TabView selection updates
-        // emitted by the same swipe gesture.
-        DispatchQueue.main.async {
-            isTabSelectionLocked = false
-        }
-    }
-
-    private func nextVisibleIndex(from index: Int) -> Int? {
-        // Try forward first
-        for i in (index + 1)..<assets.count {
-            if !trashService.isTrashed(assets[i].id) {
-                return i
-            }
-        }
-        // Then try backward
-        for i in stride(from: index - 1, through: 0, by: -1) {
-            if !trashService.isTrashed(assets[i].id) {
-                return i
-            }
-        }
-        return nil
-    }
-
-    // MARK: - Tap Navigation
-
-    private func goToPrevious() {
-        guard animationState.currentIndex > 0 else { return }
-        animationState.currentIndex -= 1
-    }
-
-    private func goToNext() {
-        guard animationState.currentIndex < assets.count - 1 else { return }
-        animationState.currentIndex += 1
-    }
-
-    private func handleEdgeTap(at location: CGPoint) {
-        let screenWidth = UIScreen.main.bounds.width
-        let edgeZone = screenWidth * 0.2  // 20% on each side
-
-        if location.x < edgeZone {
-            goToPrevious()
-        } else if location.x > screenWidth - edgeZone {
-            goToNext()
-        }
-        // Center taps are ignored
-    }
-
     // MARK: - Prefetching
 
     private func prefetchAdjacent() {
-        guard !assets.isEmpty else { return }
+        let deck = deckModel.deck
+        guard !deck.isEmpty else {
+            FullImageLoader.shared.updateCachingWindow(assetIDs: [])
+            return
+        }
 
-        // Calculate range to prefetch
+        let currentIndex = deckModel.currentIndex
         let startPrefetch = max(0, currentIndex - prefetchRange)
-        let endPrefetch = min(assets.count - 1, currentIndex + prefetchRange)
-
+        let endPrefetch = min(deck.count - 1, currentIndex + prefetchRange)
         guard startPrefetch <= endPrefetch else { return }
 
-        // Prefetch assets in range (excluding videos and trashed)
+        var photoWindowIDs: [String] = []
         for index in startPrefetch...endPrefetch {
-            let asset = assets[index]
+            let asset = deck[index]
 
-            // Skip if trashed, already prefetching, or video
-            guard !trashService.isTrashed(asset.id),
-                  asset.mediaType != .video,
-                  prefetchTasks[asset.id] == nil else {
+            if asset.mediaType == .video {
+                // Preheat the player item for immediate neighbors so
+                // playback starts instantly when swiped to
+                if index != currentIndex && abs(index - currentIndex) <= 1 {
+                    VideoPreheater.shared.preheat(assetID: asset.id)
+                }
                 continue
             }
 
-            // Start prefetch task
-            prefetchTasks[asset.id] = Task {
-                _ = await FullImageLoader.shared.loadFullImage(for: asset.id)
+            photoWindowIDs.append(asset.id)
+            if prefetchTasks[asset.id] == nil {
+                prefetchTasks[asset.id] = Task {
+                    _ = await FullImageLoader.shared.loadFullImage(for: asset.id)
+                }
             }
         }
 
-        // Cancel prefetch for assets outside range
-        let prefetchIDs = Set((startPrefetch...endPrefetch).map { assets[$0].id })
-        for (id, task) in prefetchTasks where !prefetchIDs.contains(id) {
+        // Warm PhotoKit's own pipeline for the same window
+        FullImageLoader.shared.updateCachingWindow(assetIDs: photoWindowIDs)
+
+        // Cancel prefetch for assets outside the window
+        let windowIDs = Set(photoWindowIDs)
+        for (id, task) in prefetchTasks where !windowIDs.contains(id) {
             task.cancel()
             prefetchTasks.removeValue(forKey: id)
         }
@@ -611,55 +366,7 @@ struct MediaViewerView: View {
             task.cancel()
         }
         prefetchTasks.removeAll()
-    }
-
-    // MARK: - Swipe Debug Logging
-
-    private func swipeDebugLog(_ message: String) {
-#if DEBUG
-        print("[SwipeDebug][MediaViewer] \(message)")
-#endif
-    }
-
-    private func frameString(_ frame: CGRect) -> String {
-        guard frame != .zero else { return "zero" }
-        return String(
-            format: "x=%.1f y=%.1f w=%.1f h=%.1f midY=%.1f",
-            frame.minX, frame.minY, frame.width, frame.height, frame.midY
-        )
-    }
-
-    private func shouldLogFrameChange(from oldFrame: CGRect, to newFrame: CGRect) -> Bool {
-        guard oldFrame != .zero else { return true }
-        return abs(oldFrame.minY - newFrame.minY) > 0.5 ||
-            abs(oldFrame.midY - newFrame.midY) > 0.5 ||
-            abs(oldFrame.height - newFrame.height) > 0.5
-    }
-
-    private func updateCurrentPageFrame(_ frame: CGRect, reason: String) {
-        currentPageGlobalFrame = frame
-        guard shouldLogFrameChange(from: lastLoggedCurrentPageFrame, to: frame) else { return }
-        lastLoggedCurrentPageFrame = frame
-        swipeDebugLog("CURRENT frame \(reason): \(frameString(frame))")
-    }
-
-    private func updatePreviewFrame(_ frame: CGRect, reason: String) {
-        previewPageGlobalFrame = frame
-        guard shouldLogFrameChange(from: lastLoggedPreviewFrame, to: frame) else { return }
-        lastLoggedPreviewFrame = frame
-        swipeDebugLog("PREVIEW frame \(reason): \(frameString(frame))")
-    }
-
-    private func logFrameDelta(context: String) {
-        guard currentPageGlobalFrame != .zero, previewPageGlobalFrame != .zero else {
-            swipeDebugLog("\(context) frame delta unavailable current=\(frameString(currentPageGlobalFrame)) preview=\(frameString(previewPageGlobalFrame))")
-            return
-        }
-        let deltaMinY = currentPageGlobalFrame.minY - previewPageGlobalFrame.minY
-        let deltaMidY = currentPageGlobalFrame.midY - previewPageGlobalFrame.midY
-        swipeDebugLog(
-            "\(context) frameDelta minY=\(String(format: "%.2f", deltaMinY)) midY=\(String(format: "%.2f", deltaMidY)) current=\(frameString(currentPageGlobalFrame)) preview=\(frameString(previewPageGlobalFrame))"
-        )
+        FullImageLoader.shared.updateCachingWindow(assetIDs: [])
     }
 }
 

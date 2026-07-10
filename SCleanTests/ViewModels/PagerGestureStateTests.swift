@@ -209,7 +209,8 @@ struct PagerGestureStateTests {
     @Test func behindCard_restingAndFullProgressValues() async throws {
         #expect(PagerGestureState.behindCardScale(progress: 0) == 0.90)
         #expect(abs(PagerGestureState.behindCardScale(progress: 1) - 1.0) < 0.0001)
-        #expect(PagerGestureState.behindCardDim(progress: 0) == 0.75)
+        // Fully hidden at rest so the card can enter/leave the stack seamlessly
+        #expect(PagerGestureState.behindCardDim(progress: 0) == 1)
         #expect(PagerGestureState.behindCardDim(progress: 1) == 0)
     }
 

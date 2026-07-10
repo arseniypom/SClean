@@ -116,8 +116,8 @@ final class SwipeToTrashUITests: XCTestCase {
         print("\n--- STEP 4: Rapid position capture (detecting shift) ---")
 
         // Wait minimal time for animation to complete
-        // Animation is 0.35s fly + 0.38s delay = 0.73s total
-        // But XCUITest's "wait for idle" should have handled most of this
+        // The deck mutates synchronously on commit; the reveal spring (~0.4s)
+        // and fly-out are decorative. XCUITest's "wait for idle" handles most of it.
         Thread.sleep(forTimeInterval: 0.2)
 
         // Find the element to measure (same type as initial)
