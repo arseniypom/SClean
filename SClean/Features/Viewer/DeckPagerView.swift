@@ -176,6 +176,10 @@ struct DeckPagerView: View {
         let isCurrent = index == currentIndex
         let isTopCard = asset.id == trashTopID
         let isBehindCard = asset.id == trashBehindID
+        // During a trash interaction or reveal, side neighbors are never
+        // legitimately visible (they sit 30pt offscreen at best) — hide them
+        // so no residual strip offset can ever expose a sliver of them.
+        let isHiddenSideCard = (trashTopID != nil || trashBehindID != nil) && !isTopCard && !isBehindCard
         let baseX = CGFloat(index - currentIndex) * (size.width + Self.pageGap)
 
         MediaPageView(asset: asset, isCurrentPage: isCurrent)
@@ -189,7 +193,7 @@ struct DeckPagerView: View {
             }
             .scaleEffect(cardScale(isTopCard: isTopCard, isBehindCard: isBehindCard))
             .rotationEffect(.degrees(isTopCard ? PagerGestureState.topCardRotationDegrees(progress: trashProgress) : 0))
-            .opacity(isTopCard ? PagerGestureState.topCardOpacity(progress: trashProgress) : 1)
+            .opacity(isHiddenSideCard ? 0 : (isTopCard ? PagerGestureState.topCardOpacity(progress: trashProgress) : 1))
             .offset(
                 x: isBehindCard || isTopCard ? 0 : baseX,
                 y: isTopCard ? dragY : 0
@@ -288,7 +292,7 @@ struct DeckPagerView: View {
         let previousAxis = gesture.axis
         let axis = gesture.update(translation: value.translation)
         if axis != previousAxis {
-            axisDidLock(axis)
+            axisDidLock(axis, size: size)
         }
 
         // Per-frame writes must never pick up implicit animations — nothing
@@ -335,20 +339,33 @@ struct DeckPagerView: View {
         }
     }
 
-    private func axisDidLock(_ axis: PagerGestureState.Axis) {
+    private func axisDidLock(_ axis: PagerGestureState.Axis, size: CGSize) {
         switch axis {
         case .undecided:
             break
 
         case .paging:
-            // Continue from the presented position if a settle is in flight
-            pagingBaseX = presentedOffset.value
+            // Continue from the presented position if a settle is in flight.
+            // Clamped: a stale mirror value must never displace the strip
+            // beyond one page span.
+            let pageSpan = size.width + Self.pageGap
+            pagingBaseX = min(max(presentedOffset.value, -pageSpan), pageSpan)
             clearRevealResidue()
 
         case .trashing:
             guard let current = deckModel.currentAsset else {
                 gesture.reset()
                 return
+            }
+
+            // A page-settle spring may still be moving the strip; bring it
+            // home fast so the stack is centered for the whole trash
+            // interaction (residual dragX < -30 exposed the next-next card
+            // as a sliver on the right edge).
+            if dragX != 0 {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    dragX = 0
+                }
             }
 
             let generator = UIImpactFeedbackGenerator(style: .medium)
@@ -501,9 +518,11 @@ struct DeckPagerView: View {
         }
 
         // 3. Reveal: the behind card (now the real current page) scales to
-        //    full size and its dim lifts, spring-settled
+        //    full size and its dim lifts, spring-settled. Any residual strip
+        //    offset (e.g. trash started mid page-settle) resolves with it.
         withAnimation(PagerAnimation.reveal, completionCriteria: .logicallyComplete) {
             trashProgress = 1
+            dragX = 0
         } completion: {
             // Skip cleanup if a new trash drag took over mid-reveal
             if gesture.axis != .trashing {
