@@ -53,6 +53,9 @@ struct MediaViewerView: View {
                     .transition(.opacity)
             } else {
                 pagingContent
+
+                // Keeps the white toolbar text legible over bright media
+                topScrim
             }
 
             // Access changed overlay
@@ -134,6 +137,26 @@ struct MediaViewerView: View {
             }
         )
         .ignoresSafeArea()
+    }
+
+    // MARK: - Top Scrim
+
+    /// Subtle top-edge darkening so the counter, metadata and toolbar
+    /// buttons stay readable over light content (e.g. white screenshots).
+    private var topScrim: some View {
+        LinearGradient(
+            stops: [
+                .init(color: .black.opacity(0.45), location: 0),
+                .init(color: .black.opacity(0.25), location: 0.5),
+                .init(color: .clear, location: 1),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .frame(height: 140)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .ignoresSafeArea(edges: .top)
+        .allowsHitTesting(false)
     }
 
     // MARK: - Counter View
