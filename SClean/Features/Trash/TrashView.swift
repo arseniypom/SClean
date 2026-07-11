@@ -204,25 +204,13 @@ struct TrashView: View {
                             .font(Typography.headline)
                     }
                     .foregroundStyle(Color.scTextPrimary)
-                    .padding(.horizontal, Spacing.md)
-                    .padding(.vertical, Spacing.sm)
-                    .scControlSurface()
                 }
             }
             .padding(.horizontal, Spacing.md)
             .padding(.vertical, Spacing.sm)
-            .background {
-                if #available(iOS 26.0, *) {
-                    Rectangle()
-                        .fill(.regularMaterial)
-                        .ignoresSafeArea(edges: .bottom)
-                } else {
-                    Rectangle()
-                        .fill(Color.scSurface)
-                        .ignoresSafeArea(edges: .bottom)
-                        .shadow(color: .black.opacity(0.1), radius: 8, y: -4)
-                }
-            }
+            .scControlSurface()
+            .padding(.horizontal, Spacing.md)
+            .padding(.bottom, Spacing.sm)
         }
     }
     
@@ -535,7 +523,22 @@ struct TrashViewWithNavigation: View {
         VStack {
             Spacer()
 
-            HStack(spacing: Spacing.md) {
+            // Adjacent glass elements share one container so their
+            // glass blends correctly and renders in a single pass
+            if #available(iOS 26.0, *) {
+                GlassEffectContainer {
+                    floatingActionButtons
+                }
+                .padding(.bottom, Spacing.lg)
+            } else {
+                floatingActionButtons
+                    .padding(.bottom, Spacing.lg)
+            }
+        }
+    }
+
+    private var floatingActionButtons: some View {
+        HStack(spacing: Spacing.md) {
                 // Restore All button
                 Button {
                     showRestoreAllConfirmation = true
@@ -570,11 +573,9 @@ struct TrashViewWithNavigation: View {
                     .scFloatingButtonStyle()
                 }
                 .disabled(isDeleting)
-            }
-            .padding(.bottom, Spacing.lg)
         }
     }
-    
+
     // MARK: - Selection Action Bar
     
     private var selectionActionBar: some View {
@@ -598,25 +599,13 @@ struct TrashViewWithNavigation: View {
                             .font(Typography.headline)
                     }
                     .foregroundStyle(Color.scTextPrimary)
-                    .padding(.horizontal, Spacing.md)
-                    .padding(.vertical, Spacing.sm)
-                    .scControlSurface()
                 }
             }
             .padding(.horizontal, Spacing.md)
             .padding(.vertical, Spacing.sm)
-            .background {
-                if #available(iOS 26.0, *) {
-                    Rectangle()
-                        .fill(.regularMaterial)
-                        .ignoresSafeArea(edges: .bottom)
-                } else {
-                    Rectangle()
-                        .fill(Color.scSurface)
-                        .ignoresSafeArea(edges: .bottom)
-                        .shadow(color: .black.opacity(0.1), radius: 8, y: -4)
-                }
-            }
+            .scControlSurface()
+            .padding(.horizontal, Spacing.md)
+            .padding(.bottom, Spacing.sm)
         }
     }
     

@@ -29,22 +29,23 @@ extension View {
     @ViewBuilder
     func scControlSurface() -> some View {
         if #available(iOS 26.0, *) {
+            // Explicit shape so both OS branches render the same silhouette
             self
-                .glassEffect()
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
         } else {
             self
                 .background(.regularMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: CornerRadius.md, style: .continuous))
         }
     }
-    
+
     /// Floating action button surface - Liquid Glass on iOS 26+, elevated surface on older
     /// Use for: FABs, floating controls (capsule/pill shape)
     @ViewBuilder
     func scFloatingButtonStyle() -> some View {
         if #available(iOS 26.0, *) {
             self
-                .glassEffect()
+                .glassEffect(.regular.interactive(), in: Capsule())
         } else {
             self
                 .background(Color.scSurfaceElevated)
@@ -140,7 +141,7 @@ private struct ButtonBackgroundModifier: ViewModifier {
             // Secondary: glass on iOS 26+, bordered on older
             if #available(iOS 26.0, *) {
                 content
-                    .glassEffect()
+                    .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
             } else {
                 content
                     .background(Color.clear)

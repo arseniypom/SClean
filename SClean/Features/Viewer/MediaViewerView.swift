@@ -89,7 +89,7 @@ struct MediaViewerView: View {
                                 .foregroundStyle(.white)
                                 .padding(.horizontal, 4)
                                 .padding(.vertical, 1)
-                                .background(Color.red)
+                                .background(Color.scDestructive)
                                 .clipShape(Capsule())
                                 .offset(x: 8, y: -6)
                         }

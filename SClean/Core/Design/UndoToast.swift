@@ -22,12 +22,12 @@ struct UndoToast: View {
             // Trash icon
             Image(systemName: "trash")
                 .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.white.opacity(0.8))
-            
+                .foregroundStyle(Color.scTextSecondary)
+
             // Message
             Text(message)
                 .font(Typography.callout)
-                .foregroundStyle(.white)
+                .foregroundStyle(Color.scTextPrimary)
             
             Spacer()
             
@@ -40,7 +40,7 @@ struct UndoToast: View {
             }) {
                 Text("Undo")
                     .font(Typography.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Color.scTextPrimary)
             }
         }
         .padding(.horizontal, Spacing.md)
@@ -77,9 +77,7 @@ private extension View {
     func toastBackground() -> some View {
         if #available(iOS 26.0, *) {
             self
-                .background(.black.opacity(0.7))
-                .clipShape(RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
-                .glassEffect()
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: CornerRadius.sm, style: .continuous))
         } else {
             self
                 .background(.ultraThinMaterial)
