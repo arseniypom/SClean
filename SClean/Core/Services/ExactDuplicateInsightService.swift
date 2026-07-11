@@ -62,7 +62,8 @@ actor ExactDuplicateInsightService {
         return InsightBucket(
             category: .exactDuplicates,
             count: deletableIDs.count,
-            totalBytes: totalBytes
+            totalBytes: totalBytes,
+            assetIDs: Array(deletableIDs)
         )
     }
 
@@ -173,7 +174,12 @@ actor ExactDuplicateInsightService {
         }
         guard !deletable.isEmpty else { return nil }
         let totalBytes = deletable.reduce(Int64(0)) { $0 + (bytesByID[$1] ?? 0) }
-        return InsightBucket(category: .exactDuplicates, count: deletable.count, totalBytes: totalBytes)
+        return InsightBucket(
+            category: .exactDuplicates,
+            count: deletable.count,
+            totalBytes: totalBytes,
+            assetIDs: Array(deletable)
+        )
     }
 
     // MARK: - Private

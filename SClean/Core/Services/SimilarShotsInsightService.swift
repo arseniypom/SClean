@@ -187,7 +187,12 @@ actor SimilarShotsInsightService {
     private static func makeBucket(from deletable: [IndexedAsset]) -> InsightBucket? {
         guard !deletable.isEmpty else { return nil }
         let totalBytes = deletable.reduce(Int64(0)) { $0 + $1.byteSize }
-        return InsightBucket(category: .similarShots, count: deletable.count, totalBytes: totalBytes)
+        return InsightBucket(
+            category: .similarShots,
+            count: deletable.count,
+            totalBytes: totalBytes,
+            assetIDs: deletable.map(\.id)
+        )
     }
 
     // MARK: - Vision

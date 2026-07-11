@@ -63,7 +63,25 @@ final class PhotoLibraryService: ObservableObject {
 
     /// Current insight buckets derived from the latest snapshot.
     /// Published so async receipt analysis can refresh Home without full state reload.
-    @Published private(set) var insightBuckets: [InsightBucket] = []
+    @Published private(set) var insightBuckets: [InsightBucket] = [] {
+        didSet { recomputeReclaimableBytes() }
+    }
+
+    /// Categories whose background content analysis is still running
+    @Published private(set) var analyzingInsightCategories: Set<InsightCategory> = []
+
+    /// Whether any insight content analysis is still running
+    var isAnalyzingInsights: Bool { !analyzingInsightCategories.isEmpty }
+
+    /// De-duplicated total bytes across all insight candidates (an asset that
+    /// appears in several categories is counted once)
+    @Published private(set) var reclaimableBytes: Int64 = 0
+
+    /// De-duplicated count of insight candidate assets
+    @Published private(set) var reclaimableCount: Int = 0
+
+    /// byteSize lookup for the current snapshot, rebuilt when it changes
+    private var byteSizeByID: [String: Int64] = [:]
 
     /// Current snapshot for type-filtered asset lookups
     private(set) var currentSnapshot: LibraryIndexSnapshot?
@@ -97,6 +115,7 @@ final class PhotoLibraryService: ObservableObject {
             state = .loaded(cachedSnapshot.yearBuckets)
             monthBuckets = cachedSnapshot.monthBuckets
             typeBuckets = cachedSnapshot.typeBuckets
+            rebuildByteSizeIndex(from: cachedSnapshot)
             insightBuckets = cachedSnapshot.insightBuckets.filter { $0.category != .exactDuplicates }
             currentSnapshot = cachedSnapshot
             startExactDuplicateInsightRefresh(for: cachedSnapshot)
@@ -134,6 +153,7 @@ final class PhotoLibraryService: ObservableObject {
         currentSnapshot = snapshot
         monthBuckets = snapshot.monthBuckets
         typeBuckets = snapshot.typeBuckets
+        rebuildByteSizeIndex(from: snapshot)
         insightBuckets = snapshot.insightBuckets.filter { $0.category != .exactDuplicates }
         startExactDuplicateInsightRefresh(for: snapshot)
         startReceiptInsightRefresh(for: snapshot)
@@ -146,6 +166,7 @@ final class PhotoLibraryService: ObservableObject {
             state = .empty
             monthBuckets = []
             typeBuckets = []
+            rebuildByteSizeIndex(from: nil)
             insightBuckets = []
             currentSnapshot = nil
             cancelInsightTasks()
@@ -188,6 +209,8 @@ final class PhotoLibraryService: ObservableObject {
         similarShotsInsightTask = nil
         lowQualityInsightTask?.cancel()
         lowQualityInsightTask = nil
+        // Cancelled tasks skip their endAnalyzing — clear the flags here
+        analyzingInsightCategories.removeAll()
     }
 
     // Progressive insight refreshes run at a low QoS and scan the *entire* candidate set,
@@ -196,6 +219,7 @@ final class PhotoLibraryService: ObservableObject {
 
     private func startExactDuplicateInsightRefresh(for snapshot: LibraryIndexSnapshot) {
         exactDuplicateInsightTask?.cancel()
+        beginAnalyzing(.exactDuplicates)
         exactDuplicateInsightTask = Task(priority: .utility) { [weak self] in
             await ExactDuplicateInsightService.shared.exactDuplicateBucketProgressive(
                 snapshot: snapshot
@@ -203,11 +227,14 @@ final class PhotoLibraryService: ObservableObject {
                 guard !Task.isCancelled else { return } // superseded by a newer refresh
                 await self?.mergeAsyncInsightBucket(bucket, category: .exactDuplicates)
             }
+            guard !Task.isCancelled else { return } // a newer refresh owns the flag
+            await self?.endAnalyzing(.exactDuplicates)
         }
     }
 
     private func startReceiptInsightRefresh(for snapshot: LibraryIndexSnapshot) {
         receiptInsightTask?.cancel()
+        beginAnalyzing(.receipts)
         receiptInsightTask = Task(priority: .utility) { [weak self] in
             await ReceiptInsightService.shared.receiptBucketProgressive(
                 snapshot: snapshot
@@ -215,11 +242,14 @@ final class PhotoLibraryService: ObservableObject {
                 guard !Task.isCancelled else { return } // superseded by a newer refresh
                 await self?.mergeAsyncInsightBucket(bucket, category: .receipts)
             }
+            guard !Task.isCancelled else { return } // a newer refresh owns the flag
+            await self?.endAnalyzing(.receipts)
         }
     }
 
     private func startChatMemeInsightRefresh(for snapshot: LibraryIndexSnapshot) {
         chatMemeInsightTask?.cancel()
+        beginAnalyzing(.chatMemeDump)
         chatMemeInsightTask = Task(priority: .utility) { [weak self] in
             await ChatMemeInsightService.shared.chatMemeBucketProgressive(
                 snapshot: snapshot
@@ -227,11 +257,14 @@ final class PhotoLibraryService: ObservableObject {
                 guard !Task.isCancelled else { return } // superseded by a newer refresh
                 await self?.mergeAsyncInsightBucket(bucket, category: .chatMemeDump)
             }
+            guard !Task.isCancelled else { return } // a newer refresh owns the flag
+            await self?.endAnalyzing(.chatMemeDump)
         }
     }
 
     private func startSimilarShotsInsightRefresh(for snapshot: LibraryIndexSnapshot) {
         similarShotsInsightTask?.cancel()
+        beginAnalyzing(.similarShots)
         similarShotsInsightTask = Task(priority: .utility) { [weak self] in
             await SimilarShotsInsightService.shared.similarShotsBucketProgressive(
                 snapshot: snapshot
@@ -239,11 +272,14 @@ final class PhotoLibraryService: ObservableObject {
                 guard !Task.isCancelled else { return } // superseded by a newer refresh
                 await self?.mergeAsyncInsightBucket(bucket, category: .similarShots)
             }
+            guard !Task.isCancelled else { return } // a newer refresh owns the flag
+            await self?.endAnalyzing(.similarShots)
         }
     }
 
     private func startLowQualityInsightRefresh(for snapshot: LibraryIndexSnapshot) {
         lowQualityInsightTask?.cancel()
+        beginAnalyzing(.lowQuality)
         lowQualityInsightTask = Task(priority: .utility) { [weak self] in
             await AestheticsInsightService.shared.lowQualityBucketProgressive(
                 snapshot: snapshot
@@ -251,6 +287,8 @@ final class PhotoLibraryService: ObservableObject {
                 guard !Task.isCancelled else { return } // superseded by a newer refresh
                 await self?.mergeAsyncInsightBucket(bucket, category: .lowQuality)
             }
+            guard !Task.isCancelled else { return } // a newer refresh owns the flag
+            await self?.endAnalyzing(.lowQuality)
         }
     }
 
@@ -266,6 +304,40 @@ final class PhotoLibraryService: ObservableObject {
             }
             return lhs.totalBytes > rhs.totalBytes
         }
+    }
+
+    // MARK: - Analysis Progress & Reclaimable Total
+
+    @MainActor
+    private func beginAnalyzing(_ category: InsightCategory) {
+        analyzingInsightCategories.insert(category)
+    }
+
+    @MainActor
+    private func endAnalyzing(_ category: InsightCategory) {
+        analyzingInsightCategories.remove(category)
+    }
+
+    private func rebuildByteSizeIndex(from snapshot: LibraryIndexSnapshot?) {
+        guard let snapshot else {
+            byteSizeByID = [:]
+            return
+        }
+        var index: [String: Int64] = [:]
+        index.reserveCapacity(snapshot.assets.count)
+        for asset in snapshot.assets {
+            index[asset.id] = asset.byteSize
+        }
+        byteSizeByID = index
+    }
+
+    private func recomputeReclaimableBytes() {
+        var uniqueIDs: Set<String> = []
+        for bucket in insightBuckets {
+            uniqueIDs.formUnion(bucket.assetIDs)
+        }
+        reclaimableBytes = uniqueIDs.reduce(Int64(0)) { $0 + (byteSizeByID[$1] ?? 0) }
+        reclaimableCount = uniqueIDs.count
     }
 }
 

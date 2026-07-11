@@ -123,6 +123,8 @@ nonisolated enum InsightCategory: String, CaseIterable, Identifiable, Sendable {
     case chatMemeDump = "Chat/Meme Dump"
     case shortVideos = "Short Videos"
     case lowQuality = "Blurry & Low Quality"
+    case oldScreenshots = "Old Screenshots"
+    case screenRecordings = "Screen Recordings"
 
     nonisolated var id: String { rawValue }
 
@@ -135,8 +137,10 @@ nonisolated enum InsightCategory: String, CaseIterable, Identifiable, Sendable {
         case .similarShots: return "photo.on.rectangle.angled"
         case .receipts: return "doc.text"
         case .chatMemeDump: return "message.fill"
-        case .shortVideos: return "video.fill"
+        case .shortVideos: return "timer"
         case .lowQuality: return "camera.badge.ellipsis"
+        case .oldScreenshots: return "camera.viewfinder"
+        case .screenRecordings: return "record.circle"
         }
     }
 
@@ -160,6 +164,10 @@ nonisolated enum InsightCategory: String, CaseIterable, Identifiable, Sendable {
             return "Videos up to 6s, older than 14 days"
         case .lowQuality:
             return "Blurry or unflattering shots (favorites & screenshots excluded)"
+        case .oldScreenshots:
+            return "Screenshots older than 30 days (favorites excluded)"
+        case .screenRecordings:
+            return "Screen recordings, largest first (favorites excluded)"
         }
     }
 }
@@ -171,6 +179,16 @@ nonisolated struct InsightBucket: Identifiable, Equatable, Sendable {
     let category: InsightCategory
     let count: Int
     let totalBytes: Int64
+    /// IDs of the counted candidate assets — used to compute the de-duplicated
+    /// "reclaimable total" across categories (assets can appear in several).
+    let assetIDs: [String]
+
+    init(category: InsightCategory, count: Int, totalBytes: Int64, assetIDs: [String] = []) {
+        self.category = category
+        self.count = count
+        self.totalBytes = totalBytes
+        self.assetIDs = assetIDs
+    }
 
     var id: String { category.rawValue }
 }
@@ -307,51 +325,50 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
 
         var buckets: [InsightBucket] = []
 
+        func makeBucket(_ category: InsightCategory, from matched: [IndexedAsset]) -> InsightBucket {
+            InsightBucket(
+                category: category,
+                count: matched.count,
+                totalBytes: matched.reduce(Int64(0)) { $0 + $1.byteSize },
+                assetIDs: matched.map(\.id)
+            )
+        }
+
         let largeVideos = assets(for: .largeVideos, referenceDate: referenceDate)
         let largeVideosBytes = largeVideos.reduce(Int64(0)) { $0 + $1.byteSize }
         if largeVideos.count >= Self.largeVideosMinCount && largeVideosBytes >= Self.largeVideosMinTotalBytes {
-            buckets.append(InsightBucket(
-                category: .largeVideos,
-                count: largeVideos.count,
-                totalBytes: largeVideosBytes
-            ))
+            buckets.append(makeBucket(.largeVideos, from: largeVideos))
         }
 
         let largePhotos = assets(for: .largePhotos, referenceDate: referenceDate)
         let largePhotosBytes = largePhotos.reduce(Int64(0)) { $0 + $1.byteSize }
         if largePhotos.count >= Self.largePhotosMinCount && largePhotosBytes >= Self.largePhotosMinTotalBytes {
-            buckets.append(InsightBucket(
-                category: .largePhotos,
-                count: largePhotos.count,
-                totalBytes: largePhotosBytes
-            ))
+            buckets.append(makeBucket(.largePhotos, from: largePhotos))
         }
 
         let heavyVideos = assets(for: .heavyOldVideos, referenceDate: referenceDate)
         if heavyVideos.count >= 1 {
-            buckets.append(InsightBucket(
-                category: .heavyOldVideos,
-                count: heavyVideos.count,
-                totalBytes: heavyVideos.reduce(0) { $0 + $1.byteSize }
-            ))
+            buckets.append(makeBucket(.heavyOldVideos, from: heavyVideos))
         }
 
         let similarCandidates = assets(for: .similarShots, referenceDate: referenceDate)
         if similarCandidates.count >= 2 {
-            buckets.append(InsightBucket(
-                category: .similarShots,
-                count: similarCandidates.count,
-                totalBytes: similarCandidates.reduce(0) { $0 + $1.byteSize }
-            ))
+            buckets.append(makeBucket(.similarShots, from: similarCandidates))
         }
 
         let shortVideos = assets(for: .shortVideos, referenceDate: referenceDate)
         if shortVideos.count >= 4 {
-            buckets.append(InsightBucket(
-                category: .shortVideos,
-                count: shortVideos.count,
-                totalBytes: shortVideos.reduce(0) { $0 + $1.byteSize }
-            ))
+            buckets.append(makeBucket(.shortVideos, from: shortVideos))
+        }
+
+        let oldScreenshots = assets(for: .oldScreenshots, referenceDate: referenceDate)
+        if oldScreenshots.count >= Self.oldScreenshotsMinCount {
+            buckets.append(makeBucket(.oldScreenshots, from: oldScreenshots))
+        }
+
+        let screenRecordings = assets(for: .screenRecordings, referenceDate: referenceDate)
+        if screenRecordings.count >= 1 {
+            buckets.append(makeBucket(.screenRecordings, from: screenRecordings))
         }
 
         return buckets.sorted { lhs, rhs in
@@ -410,8 +427,10 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
 
         switch category {
         case .largeVideos:
+            // Screen recordings are excluded — they have their own insight
             return assets.filter {
                 $0.mediaType == 2 &&
+                ($0.mediaSubtypes & Self.screenRecordingMask) == 0 &&
                 !$0.isFavorite
             }
             .sorted { $0.byteSize > $1.byteSize }
@@ -430,12 +449,16 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
             .map { $0 }
 
         case .exactDuplicates:
-            return duplicateCandidates()
-                .sorted { $0.creationDate < $1.creationDate }
+            // Exact duplicates are verified by hashing in
+            // ExactDuplicateInsightService (which does its own coarse grouping);
+            // there is no meaningful metadata-only asset list for this category.
+            return []
 
         case .heavyOldVideos:
+            // Screen recordings are excluded — they have their own insight
             return assets.filter {
                 $0.mediaType == 2 &&
+                ($0.mediaSubtypes & Self.screenRecordingMask) == 0 &&
                 !$0.isFavorite &&
                 $0.byteSize >= Self.heavyVideoMinBytes &&
                 $0.creationDate < cutoffHeavyVideos
@@ -488,6 +511,24 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
                 ($0.mediaSubtypes & Self.screenshotMask) == 0
             }
             .sorted { $0.creationDate < $1.creationDate }
+
+        case .oldScreenshots:
+            let cutoffScreenshots = Self.cutoffDate(daysAgo: Self.oldScreenshotsMinAgeDays, referenceDate: referenceDate)
+            return assets.filter {
+                $0.mediaType == 1 &&
+                ($0.mediaSubtypes & Self.screenshotMask) != 0 &&
+                !$0.isFavorite &&
+                $0.creationDate < cutoffScreenshots
+            }
+            .sorted { $0.creationDate < $1.creationDate }
+
+        case .screenRecordings:
+            return assets.filter {
+                $0.mediaType == 2 &&
+                ($0.mediaSubtypes & Self.screenRecordingMask) != 0 &&
+                !$0.isFavorite
+            }
+            .sorted { $0.byteSize > $1.byteSize }
         }
     }
 
@@ -496,30 +537,6 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
     func similarShotClusters(referenceDate: Date = Date()) -> [[IndexedAsset]] {
         let cutoff = Self.cutoffDate(daysAgo: Self.similarShotsMinAgeDays, referenceDate: referenceDate)
         return similarShotClusters(maxCutoffDate: cutoff)
-    }
-
-    private func duplicateCandidates() -> [IndexedAsset] {
-        var groups: [DuplicateKey: [IndexedAsset]] = [:]
-        groups.reserveCapacity(assets.count)
-
-        for asset in assets where (asset.mediaType == 1 || asset.mediaType == 2) && asset.byteSize > 0 {
-            let key = DuplicateKey(
-                mediaType: asset.mediaType,
-                byteSize: asset.byteSize,
-                pixelWidth: asset.pixelWidth,
-                pixelHeight: asset.pixelHeight,
-                roundedDuration: Int((asset.duration * 10).rounded())
-            )
-            groups[key, default: []].append(asset)
-        }
-
-        var result: [IndexedAsset] = []
-        for group in groups.values where group.count >= 2 {
-            let keeperID = Self.preferredKeeper(in: group).id
-            result.append(contentsOf: group.filter { $0.id != keeperID })
-        }
-
-        return result
     }
 
     private func similarShotCandidates(maxCutoffDate: Date) -> [IndexedAsset] {
@@ -588,14 +605,6 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
         Calendar.current.date(byAdding: .day, value: -daysAgo, to: referenceDate) ?? .distantPast
     }
 
-    private struct DuplicateKey: Hashable {
-        let mediaType: Int
-        let byteSize: Int64
-        let pixelWidth: Int
-        let pixelHeight: Int
-        let roundedDuration: Int
-    }
-
     private static let photoLiveMask = 0x8
     private static let screenshotMask = 0x4
     private static let screenRecordingMask = 0x80000
@@ -607,6 +616,8 @@ nonisolated struct LibraryIndexSnapshot: Codable, Equatable, Sendable {
     private static let similarShotsMinAgeDays = 7
     private static let receiptMinAgeDays = 45
     private static let chatMemeMaxBytes: Int64 = 8 * 1_048_576
+    private static let oldScreenshotsMinAgeDays = 30
+    private static let oldScreenshotsMinCount = 10
     private static let largeMediaLimit = 50
     private static let largeVideosMinCount = 3
     private static let largeVideosMinTotalBytes: Int64 = 500 * 1_048_576

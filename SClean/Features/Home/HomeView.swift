@@ -234,10 +234,14 @@ struct HomeView: View {
                         .padding(.horizontal, Spacing.md)
                     }
                 } else {
-                    if insights.isEmpty {
-                        InsightEmptyCard()
-                            .padding(.horizontal, Spacing.md)
-                    } else {
+                    if !insights.isEmpty {
+                        InsightsHeroCard(
+                            reclaimableBytes: libraryService.reclaimableBytes,
+                            candidateCount: libraryService.reclaimableCount,
+                            isAnalyzing: libraryService.isAnalyzingInsights
+                        )
+                        .padding(.horizontal, Spacing.md)
+
                         ForEach(insights) { bucket in
                             NavigationLink {
                                 InsightGridView(
@@ -252,6 +256,12 @@ struct HomeView: View {
                             .accessibilityIdentifier("insightCard_\(bucket.id)")
                             .padding(.horizontal, Spacing.md)
                         }
+                    } else if libraryService.isAnalyzingInsights {
+                        InsightAnalyzingCard()
+                            .padding(.horizontal, Spacing.md)
+                    } else {
+                        InsightEmptyCard()
+                            .padding(.horizontal, Spacing.md)
                     }
                 }
 
@@ -294,6 +304,85 @@ struct HomeView: View {
         Task {
             await libraryService.fetchYears()
         }
+    }
+}
+
+// MARK: - Insights Hero
+
+/// Motivational summary above the insight cards: the de-duplicated total the
+/// user could free, plus a subtle live indicator while content analysis runs.
+private struct InsightsHeroCard: View {
+    let reclaimableBytes: Int64
+    let candidateCount: Int
+    let isAnalyzing: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text("Free up \(formattedBytes)")
+                .font(Typography.title1)
+                .foregroundStyle(Color.scTint)
+                .contentTransition(.numericText())
+                .animation(.snappy, value: reclaimableBytes)
+
+            Text("\(candidateCount) items you likely don't need")
+                .font(Typography.subheadline)
+                .foregroundStyle(Color.scTextSecondary)
+
+            if isAnalyzing {
+                HStack(spacing: Spacing.xs) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(Color.scTextSecondary)
+                    Text("Analyzing your library…")
+                        .font(Typography.caption1)
+                        .foregroundStyle(Color.scTextSecondary)
+                }
+                .padding(.top, Spacing.xxs)
+                .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Spacing.md)
+        .scCardStyle()
+        .animation(.easeInOut(duration: 0.2), value: isAnalyzing)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("You can free up \(formattedBytes) across \(candidateCount) items")
+    }
+
+    private var formattedBytes: String {
+        let gb = Double(reclaimableBytes) / 1_073_741_824
+        let mb = Double(reclaimableBytes) / 1_048_576
+        if gb >= 1.0 {
+            return String(format: "~%.1f GB", gb)
+        } else if mb >= 1.0 {
+            return String(format: "~%.0f MB", mb)
+        } else {
+            return "< 1 MB"
+        }
+    }
+}
+
+/// Shown on the Insights tab while background analysis runs and no
+/// insight has surfaced yet, so cards don't just silently appear.
+private struct InsightAnalyzingCard: View {
+    var body: some View {
+        HStack(spacing: Spacing.sm) {
+            ProgressView()
+                .tint(Color.scTextSecondary)
+
+            VStack(alignment: .leading, spacing: Spacing.xxs) {
+                Text("Analyzing your library…")
+                    .font(Typography.title3)
+                    .foregroundStyle(Color.scTextPrimary)
+
+                Text("Cleanup insights will appear here shortly.")
+                    .font(Typography.subheadline)
+                    .foregroundStyle(Color.scTextSecondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Spacing.md)
+        .scCardStyle()
     }
 }
 
@@ -344,4 +433,18 @@ private struct TabHeaderButton: View {
 #Preview {
     let service = PhotoPermissionService()
     return HomeView(permissionService: service)
+}
+
+#Preview("Insights Hero") {
+    VStack(spacing: Spacing.sm) {
+        InsightsHeroCard(
+            reclaimableBytes: 2_040_109_465,
+            candidateCount: 312,
+            isAnalyzing: true
+        )
+        InsightAnalyzingCard()
+        InsightEmptyCard()
+    }
+    .padding(Spacing.md)
+    .background(Color.scBackground)
 }

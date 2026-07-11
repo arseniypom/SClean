@@ -442,17 +442,81 @@ struct LibraryIndexStoreTests {
         #expect(buckets.isEmpty)
     }
 
-    @Test func snapshot_assetsForExactDuplicates_excludesPreferredKeeper() {
+    @Test func snapshot_assetsForExactDuplicates_isEmptyMetadataOnly() {
+        // Exact duplicates are verified by hashing in ExactDuplicateInsightService;
+        // the metadata-only path deliberately returns nothing.
         let oldDate = Date(timeIntervalSince1970: 1_746_576_000)
         let assets = [
-            TestFactory.indexedAsset(id: "keep", byteSize: 4 * TestBytes.oneMB, creationDate: oldDate, lastKnownChangeDate: oldDate, mediaType: 1, isFavorite: true),
-            TestFactory.indexedAsset(id: "delete1", byteSize: 4 * TestBytes.oneMB, creationDate: oldDate.addingTimeInterval(1), lastKnownChangeDate: oldDate, mediaType: 1),
-            TestFactory.indexedAsset(id: "delete2", byteSize: 4 * TestBytes.oneMB, creationDate: oldDate.addingTimeInterval(2), lastKnownChangeDate: oldDate, mediaType: 1)
+            TestFactory.indexedAsset(id: "a", byteSize: 4 * TestBytes.oneMB, creationDate: oldDate, lastKnownChangeDate: oldDate, mediaType: 1),
+            TestFactory.indexedAsset(id: "b", byteSize: 4 * TestBytes.oneMB, creationDate: oldDate.addingTimeInterval(1), lastKnownChangeDate: oldDate, mediaType: 1)
         ]
         let snapshot = TestFactory.librarySnapshot(assets: assets)
 
-        let filtered = snapshot.assets(for: .exactDuplicates)
-        #expect(filtered.map(\.id).sorted() == ["delete1", "delete2"])
+        #expect(snapshot.assets(for: .exactDuplicates).isEmpty)
+    }
+
+    @Test func snapshot_assetsForLargeVideos_excludesScreenRecordings() {
+        let date = Date(timeIntervalSince1970: 1_746_576_000)
+        let assets = [
+            TestFactory.indexedAsset(id: "video", byteSize: TestBytes.oneGB, creationDate: date, lastKnownChangeDate: date, mediaType: 2, duration: 60),
+            TestFactory.indexedAsset(id: "recording", byteSize: 2 * TestBytes.oneGB, creationDate: date, lastKnownChangeDate: date, mediaType: 2, mediaSubtypes: 0x80000, duration: 60)
+        ]
+        let snapshot = TestFactory.librarySnapshot(assets: assets)
+
+        #expect(snapshot.assets(for: .largeVideos).map(\.id) == ["video"])
+    }
+
+    @Test func snapshot_assetsForOldScreenshots_appliesAgeAndFavoriteFilters() {
+        let referenceDate = Date(timeIntervalSince1970: 1_767_225_600) // January 1, 2026
+        let oldDate = Date(timeIntervalSince1970: 1_746_576_000) // May 8, 2025
+        let recentDate = Date(timeIntervalSince1970: 1_766_880_000) // December 28, 2025 (< 30 days)
+
+        let assets = [
+            TestFactory.indexedAsset(id: "old-shot", creationDate: oldDate, lastKnownChangeDate: oldDate, mediaType: 1, mediaSubtypes: 0x4),
+            TestFactory.indexedAsset(id: "recent-shot", creationDate: recentDate, lastKnownChangeDate: recentDate, mediaType: 1, mediaSubtypes: 0x4),
+            TestFactory.indexedAsset(id: "fav-shot", creationDate: oldDate, lastKnownChangeDate: oldDate, mediaType: 1, mediaSubtypes: 0x4, isFavorite: true),
+            TestFactory.indexedAsset(id: "plain-photo", creationDate: oldDate, lastKnownChangeDate: oldDate, mediaType: 1)
+        ]
+        let snapshot = TestFactory.librarySnapshot(assets: assets)
+
+        #expect(snapshot.assets(for: .oldScreenshots, referenceDate: referenceDate).map(\.id) == ["old-shot"])
+    }
+
+    @Test func snapshot_assetsForScreenRecordings_sortedBySizeDescending() {
+        let date = Date(timeIntervalSince1970: 1_746_576_000)
+        let assets = [
+            TestFactory.indexedAsset(id: "small-rec", byteSize: 50 * TestBytes.oneMB, creationDate: date, lastKnownChangeDate: date, mediaType: 2, mediaSubtypes: 0x80000, duration: 20),
+            TestFactory.indexedAsset(id: "big-rec", byteSize: 900 * TestBytes.oneMB, creationDate: date, lastKnownChangeDate: date, mediaType: 2, mediaSubtypes: 0x80000, duration: 90),
+            TestFactory.indexedAsset(id: "fav-rec", byteSize: TestBytes.oneGB, creationDate: date, lastKnownChangeDate: date, mediaType: 2, mediaSubtypes: 0x80000, duration: 90, isFavorite: true),
+            TestFactory.indexedAsset(id: "plain-video", byteSize: TestBytes.oneGB, creationDate: date, lastKnownChangeDate: date, mediaType: 2, duration: 90)
+        ]
+        let snapshot = TestFactory.librarySnapshot(assets: assets)
+
+        #expect(snapshot.assets(for: .screenRecordings).map(\.id) == ["big-rec", "small-rec"])
+    }
+
+    @Test func snapshot_insightBuckets_includesScreenRecordingsAndGatesOldScreenshots() {
+        let referenceDate = Date(timeIntervalSince1970: 1_767_225_600)
+        let oldDate = Date(timeIntervalSince1970: 1_746_576_000)
+
+        // One screen recording is enough for its bucket; 9 old screenshots are
+        // below the min count of 10 and must not surface
+        var assets = [
+            TestFactory.indexedAsset(id: "rec", byteSize: 300 * TestBytes.oneMB, creationDate: oldDate, lastKnownChangeDate: oldDate, mediaType: 2, mediaSubtypes: 0x80000, duration: 30)
+        ]
+        for index in 0..<9 {
+            assets.append(
+                TestFactory.indexedAsset(id: "shot-\(index)", creationDate: oldDate, lastKnownChangeDate: oldDate, mediaType: 1, mediaSubtypes: 0x4)
+            )
+        }
+        let snapshot = TestFactory.librarySnapshot(assets: assets)
+        let buckets = snapshot.insightBuckets(referenceDate: referenceDate)
+        let categories = Set(buckets.map(\.category))
+
+        #expect(categories.contains(.screenRecordings))
+        #expect(!categories.contains(.oldScreenshots))
+        // Bucket carries its member IDs for the de-duplicated reclaimable total
+        #expect(buckets.first { $0.category == .screenRecordings }?.assetIDs == ["rec"])
     }
 
     @Test func snapshot_assetsForHeavyOldVideos_appliesSizeAgeAndFavoriteFilters() {

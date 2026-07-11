@@ -47,9 +47,14 @@ actor ReceiptInsightService {
             analysisBudget: analysisBudget
         )
 
-        guard !receiptAssets.isEmpty else { return nil }
+        guard receiptAssets.count >= Self.minBucketCount else { return nil }
         let totalBytes = receiptAssets.reduce(Int64(0)) { $0 + $1.byteSize }
-        return InsightBucket(category: .receipts, count: receiptAssets.count, totalBytes: totalBytes)
+        return InsightBucket(
+            category: .receipts,
+            count: receiptAssets.count,
+            totalBytes: totalBytes,
+            assetIDs: receiptAssets.map(\.id)
+        )
     }
 
     func receiptAssetIDs(
@@ -186,9 +191,15 @@ actor ReceiptInsightService {
 
     private static func makeBucket(from candidates: [IndexedAsset], matchedIDs: Set<String>) -> InsightBucket? {
         let matched = candidates.filter { matchedIDs.contains($0.id) }
-        guard !matched.isEmpty else { return nil }
+        // A single stray match is not an actionable cleanup — don't surface a card for it
+        guard matched.count >= minBucketCount else { return nil }
         let totalBytes = matched.reduce(Int64(0)) { $0 + $1.byteSize }
-        return InsightBucket(category: .receipts, count: matched.count, totalBytes: totalBytes)
+        return InsightBucket(
+            category: .receipts,
+            count: matched.count,
+            totalBytes: totalBytes,
+            assetIDs: matched.map(\.id)
+        )
     }
 
     private func computeReceiptScore(for assetID: String) async -> Double {
@@ -293,6 +304,9 @@ actor ReceiptInsightService {
     }
 
     static let receiptScoreThreshold = 3.2
+
+    /// A card with fewer matches than this is noise, not an actionable cleanup
+    private static let minBucketCount = 3
 
     private static let strongKeywords = [
         "receipt", "merchant", "subtotal", "vat", "invoice",

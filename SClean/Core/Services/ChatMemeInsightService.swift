@@ -49,7 +49,12 @@ actor ChatMemeInsightService {
 
         guard matchedAssets.count >= Self.minBucketCount else { return nil }
         let totalBytes = matchedAssets.reduce(Int64(0)) { $0 + $1.byteSize }
-        return InsightBucket(category: .chatMemeDump, count: matchedAssets.count, totalBytes: totalBytes)
+        return InsightBucket(
+            category: .chatMemeDump,
+            count: matchedAssets.count,
+            totalBytes: totalBytes,
+            assetIDs: matchedAssets.map(\.id)
+        )
     }
 
     func chatMemeAssetIDs(
@@ -205,7 +210,12 @@ actor ChatMemeInsightService {
         let matched = candidates.filter { matchedIDs.contains($0.id) }
         guard matched.count >= minBucketCount else { return nil }
         let totalBytes = matched.reduce(Int64(0)) { $0 + $1.byteSize }
-        return InsightBucket(category: .chatMemeDump, count: matched.count, totalBytes: totalBytes)
+        return InsightBucket(
+            category: .chatMemeDump,
+            count: matched.count,
+            totalBytes: totalBytes,
+            assetIDs: matched.map(\.id)
+        )
     }
 
     private func computeChatMemeScore(for asset: IndexedAsset) async -> Double {
