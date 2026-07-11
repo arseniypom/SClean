@@ -28,7 +28,10 @@ final class ViewerDeckModel: ObservableObject {
     /// Original position of each asset, for stable undo re-insertion
     private let originalIndexByID: [String: Int]
 
-    init(assets: [YearAsset], startIndex: Int, trashService: TrashService = .shared) {
+    init(assets: [YearAsset], startIndex: Int, trashService: TrashService? = nil) {
+        // Default resolved in the body: `.shared` is MainActor-isolated and can't
+        // be a default argument until the Swift 6 language mode.
+        let trashService = trashService ?? .shared
         self.trashService = trashService
         self.allAssets = assets
 

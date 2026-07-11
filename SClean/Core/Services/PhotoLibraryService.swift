@@ -220,75 +220,77 @@ final class PhotoLibraryService: ObservableObject {
     private func startExactDuplicateInsightRefresh(for snapshot: LibraryIndexSnapshot) {
         exactDuplicateInsightTask?.cancel()
         beginAnalyzing(.exactDuplicates)
-        exactDuplicateInsightTask = Task(priority: .utility) { [weak self] in
+        // Strong self is fine: the service is a never-deallocated singleton,
+        // and the task only holds it until completion.
+        exactDuplicateInsightTask = Task(priority: .utility) {
             await ExactDuplicateInsightService.shared.exactDuplicateBucketProgressive(
                 snapshot: snapshot
             ) { bucket in
                 guard !Task.isCancelled else { return } // superseded by a newer refresh
-                await self?.mergeAsyncInsightBucket(bucket, category: .exactDuplicates)
+                await self.mergeAsyncInsightBucket(bucket, category: .exactDuplicates)
             }
             guard !Task.isCancelled else { return } // a newer refresh owns the flag
-            await self?.endAnalyzing(.exactDuplicates)
+            self.endAnalyzing(.exactDuplicates)
         }
     }
 
     private func startReceiptInsightRefresh(for snapshot: LibraryIndexSnapshot) {
         receiptInsightTask?.cancel()
         beginAnalyzing(.receipts)
-        receiptInsightTask = Task(priority: .utility) { [weak self] in
+        receiptInsightTask = Task(priority: .utility) {
             await ReceiptInsightService.shared.receiptBucketProgressive(
                 snapshot: snapshot
             ) { bucket in
                 guard !Task.isCancelled else { return } // superseded by a newer refresh
-                await self?.mergeAsyncInsightBucket(bucket, category: .receipts)
+                await self.mergeAsyncInsightBucket(bucket, category: .receipts)
             }
             guard !Task.isCancelled else { return } // a newer refresh owns the flag
-            await self?.endAnalyzing(.receipts)
+            self.endAnalyzing(.receipts)
         }
     }
 
     private func startChatMemeInsightRefresh(for snapshot: LibraryIndexSnapshot) {
         chatMemeInsightTask?.cancel()
         beginAnalyzing(.chatMemeDump)
-        chatMemeInsightTask = Task(priority: .utility) { [weak self] in
+        chatMemeInsightTask = Task(priority: .utility) {
             await ChatMemeInsightService.shared.chatMemeBucketProgressive(
                 snapshot: snapshot
             ) { bucket in
                 guard !Task.isCancelled else { return } // superseded by a newer refresh
-                await self?.mergeAsyncInsightBucket(bucket, category: .chatMemeDump)
+                await self.mergeAsyncInsightBucket(bucket, category: .chatMemeDump)
             }
             guard !Task.isCancelled else { return } // a newer refresh owns the flag
-            await self?.endAnalyzing(.chatMemeDump)
+            self.endAnalyzing(.chatMemeDump)
         }
     }
 
     private func startSimilarShotsInsightRefresh(for snapshot: LibraryIndexSnapshot) {
         similarShotsInsightTask?.cancel()
         beginAnalyzing(.similarShots)
-        similarShotsInsightTask = Task(priority: .utility) { [weak self] in
+        similarShotsInsightTask = Task(priority: .utility) {
             await SimilarShotsInsightService.shared.similarShotsBucketProgressive(
                 snapshot: snapshot
             ) { bucket in
                 guard !Task.isCancelled else { return } // superseded by a newer refresh
-                await self?.mergeAsyncInsightBucket(bucket, category: .similarShots)
+                await self.mergeAsyncInsightBucket(bucket, category: .similarShots)
             }
             guard !Task.isCancelled else { return } // a newer refresh owns the flag
-            await self?.endAnalyzing(.similarShots)
+            self.endAnalyzing(.similarShots)
         }
     }
 
     private func startLowQualityInsightRefresh(for snapshot: LibraryIndexSnapshot) {
         lowQualityInsightTask?.cancel()
         beginAnalyzing(.lowQuality)
-        lowQualityInsightTask = Task(priority: .utility) { [weak self] in
+        lowQualityInsightTask = Task(priority: .utility) {
             await AestheticsInsightService.shared.lowQualityBucketProgressive(
                 snapshot: snapshot
             ) { bucket in
                 guard !Task.isCancelled else { return } // superseded by a newer refresh
-                await self?.mergeAsyncInsightBucket(bucket, category: .lowQuality)
+                await self.mergeAsyncInsightBucket(bucket, category: .lowQuality)
             }
             guard !Task.isCancelled else { return } // a newer refresh owns the flag
-            await self?.endAnalyzing(.lowQuality)
+            self.endAnalyzing(.lowQuality)
         }
     }
 

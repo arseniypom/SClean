@@ -84,9 +84,6 @@ final class TypePhotosService: ObservableObject {
         let identifiers = indexedAssets.map { $0.id }
         let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
 
-        // Build ID -> IndexedAsset map for quick lookup
-        let indexedMap = Dictionary(uniqueKeysWithValues: indexedAssets.map { ($0.id, $0) })
-
         // Build PHAsset results in the order from indexedAssets (preserves sort order)
         var assetMap: [String: PHAsset] = [:]
         fetchResult.enumerateObjects { phAsset, _, _ in
