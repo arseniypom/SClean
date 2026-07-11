@@ -184,6 +184,9 @@ struct DeckPagerView: View {
 
         MediaPageView(asset: asset, isCurrentPage: isCurrent)
             .frame(width: size.width, height: size.height)
+            // Pages are hard-clipped to their bounds (as TabView did) — no
+            // subview of one page can ever paint over a neighboring page
+            .clipped()
             .overlay {
                 // Dim veil on the behind card; lifts as the reveal progresses
                 if isBehindCard {
@@ -261,6 +264,7 @@ struct DeckPagerView: View {
             }
         }
         .frame(width: size.width, height: size.height)
+        .clipped()
         .scaleEffect(lerp(card.startScale, 0.3, card.progress))
         .rotationEffect(.degrees(lerp(card.startRotation, 20, Double(card.progress))))
         .offset(y: lerp(card.startOffsetY, -(size.height * 0.9), card.progress))

@@ -17,12 +17,23 @@ struct VideoPlayerView: View {
     @State private var isReadyToPlay = false
     @State private var isPlaying = false
     @State private var isMuted = true
-    @State private var isLoading = true
+    @State private var isLoading: Bool
     @State private var hasError = false
-    @State private var thumbnailImage: UIImage?
+    @State private var posterImage: UIImage?
+    @State private var posterLoadToken: UUID?
     @State private var loadTask: Task<Void, Never>?
     @State private var loopObserver: NSObjectProtocol?
     @State private var statusCancellable: AnyCancellable?
+
+    init(assetID: String) {
+        self.assetID = assetID
+        // The shared image pipeline returns the video's poster frame at its
+        // real aspect ratio (prefetch usually has it warm), so the poster and
+        // the first playback frame are the same shape — no resize jump.
+        let poster = FullImageLoader.shared.getDisplayableImage(for: assetID)
+        _posterImage = State(initialValue: poster)
+        _isLoading = State(initialValue: poster == nil)
+    }
 
     var body: some View {
         ZStack {
@@ -36,8 +47,8 @@ struct VideoPlayerView: View {
             // Poster stays on top until the player is actually ready,
             // so there is never a black flash between pages.
             if !isReadyToPlay {
-                if let thumbnailImage {
-                    Image(uiImage: thumbnailImage)
+                if let posterImage {
+                    Image(uiImage: posterImage)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
                 } else if isLoading {
@@ -134,15 +145,21 @@ struct VideoPlayerView: View {
     // MARK: - Actions
 
     private func loadVideo() {
-        loadTask = Task {
-            // Poster first — the page is presentable immediately
-            if thumbnailImage == nil, let thumb = await loadThumbnail() {
-                thumbnailImage = thumb
-                isLoading = false
+        // Poster via the shared image pipeline if the cache was cold —
+        // progressive, aspect-correct, cancellable
+        if posterImage == nil && posterLoadToken == nil {
+            posterLoadToken = FullImageLoader.shared.loadImage(for: assetID) { loaded, isFinal in
+                if isFinal {
+                    posterLoadToken = nil
+                }
+                if let loaded, !isReadyToPlay {
+                    posterImage = loaded
+                    isLoading = false
+                }
             }
+        }
 
-            guard !Task.isCancelled else { return }
-
+        loadTask = Task {
             // Preheated item (instant) or on-demand request — one shared path.
             // requestPlayerItem handles slow-mo and edited videos that
             // requestAVAsset returned as AVComposition (previously a false
@@ -227,6 +244,10 @@ struct VideoPlayerView: View {
     private func stopAndCleanup() {
         loadTask?.cancel()
         loadTask = nil
+        if let token = posterLoadToken {
+            posterLoadToken = nil
+            FullImageLoader.shared.cancelLoad(for: assetID, token: token)
+        }
         statusCancellable?.cancel()
         statusCancellable = nil
         if let loopObserver {
@@ -237,15 +258,6 @@ struct VideoPlayerView: View {
         player = nil
         isPlaying = false
         isReadyToPlay = false
-    }
-
-    // MARK: - Asset Loading
-
-    private func loadThumbnail() async -> UIImage? {
-        await ThumbnailLoader.shared.loadThumbnail(
-            for: assetID,
-            targetSize: CGSize(width: 400, height: 400)
-        )
     }
 }
 

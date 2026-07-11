@@ -28,21 +28,20 @@ struct MediaPageView: View {
         // Each page is a fresh view identity with new @State, so without this the
         // view briefly shows ProgressView before the cached image loads. A degraded
         // (fast preview) image is good enough to start with — the final image
-        // sharpens in place once loaded.
-        if asset.mediaType != .video,
-           let cached = FullImageLoader.shared.getCachedImage(for: asset.id) {
+        // sharpens in place once loaded. Videos flow through the same pipeline:
+        // requestImage returns their poster frame at the correct aspect ratio.
+        if let cached = FullImageLoader.shared.getCachedImage(for: asset.id) {
             _image = State(initialValue: cached)
             _isFinalImage = State(initialValue: true)
             _isLoading = State(initialValue: false)
-        } else if asset.mediaType != .video,
-                  let preview = FullImageLoader.shared.getDisplayableImage(for: asset.id) {
+        } else if let preview = FullImageLoader.shared.getDisplayableImage(for: asset.id) {
             _image = State(initialValue: preview)
             _isFinalImage = State(initialValue: false)
             _isLoading = State(initialValue: false)
         } else {
             _image = State(initialValue: nil)
             _isFinalImage = State(initialValue: false)
-            _isLoading = State(initialValue: asset.mediaType != .video)
+            _isLoading = State(initialValue: true)
         }
     }
     
@@ -57,25 +56,28 @@ struct MediaPageView: View {
                 if isCurrentPage {
                     VideoPlayerView(assetID: asset.id)
                 } else {
-                    // Show static thumbnail when not current page
-                    thumbnailView
+                    // Aspect-fit poster from the shared image pipeline — the
+                    // same frame the player shows, so becoming current (or
+                    // being revealed by a trash commit) never reshapes
+                    photoView
+                        .overlay {
+                            playBadge
+                        }
                 }
-                
+
             case .photo, .livePhoto, .unknown:
                 photoView
             }
         }
         .onAppear {
-            if asset.mediaType != .video {
-                loadImage()
-            }
+            loadImage()
         }
         .onDisappear {
             cancelLoad()
         }
         .onChange(of: isCurrentPage) { _, isCurrent in
             // Reload if becoming current without a full-quality image yet
-            if isCurrent && !isFinalImage && asset.mediaType != .video {
+            if isCurrent && !isFinalImage {
                 loadImage()
             }
         }
@@ -105,24 +107,20 @@ struct MediaPageView: View {
         }
     }
     
-    // MARK: - Thumbnail View (for non-current video pages)
-    
-    @ViewBuilder
-    private var thumbnailView: some View {
-        ThumbnailImageView(assetID: asset.id)
-            .overlay {
-                // Video indicator
-                ZStack {
-                    Circle()
-                        .fill(.black.opacity(0.4))
-                        .frame(width: 56, height: 56)
-                    
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 22, weight: .medium))
-                        .foregroundStyle(.white)
-                        .offset(x: 2)
-                }
-            }
+    // MARK: - Play Badge (for non-current video pages)
+
+    private var playBadge: some View {
+        ZStack {
+            Circle()
+                .fill(.black.opacity(0.4))
+                .frame(width: 56, height: 56)
+
+            Image(systemName: "play.fill")
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(.white)
+                .offset(x: 2)
+        }
+        .allowsHitTesting(false)
     }
     
     // MARK: - Error View
