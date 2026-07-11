@@ -17,7 +17,11 @@ struct InsightGridView: View {
 
     @State private var hasAppeared = false
     @State private var showMoveAllConfirmation = false
-    
+    @State private var isSelecting = false
+    @State private var selectedIDs: Set<String> = []
+    @State private var showMoveSelectedConfirmation = false
+    @State private var toast: ToastData?
+
     private enum DuplicateRole {
         case keeper
         case extra
@@ -48,16 +52,52 @@ struct InsightGridView: View {
         .navigationTitle(bucket.category.rawValue)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                if !visibleAssets.isEmpty {
-                    Button(moveButtonTitle) {
-                        showMoveAllConfirmation = true
+            if isSelecting {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        exitSelectionMode()
                     }
-                    .font(Typography.subheadline)
-                    .foregroundStyle(Color.scDestructive)
+                    .font(Typography.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.scTint)
+                }
+            } else {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if !visibleAssets.isEmpty {
+                        Button("Select") {
+                            isSelecting = true
+                        }
+                        .font(Typography.subheadline)
+                        .foregroundStyle(Color.scTint)
+
+                        Menu {
+                            if bucket.category != .exactDuplicates {
+                                Picker("Sort", selection: sortModeBinding) {
+                                    ForEach(InsightSortMode.allCases) { mode in
+                                        Label(mode.rawValue, systemImage: mode.icon)
+                                            .tag(mode)
+                                    }
+                                }
+                            }
+
+                            Button(role: .destructive) {
+                                showMoveAllConfirmation = true
+                            } label: {
+                                Label(moveButtonTitle, systemImage: "trash")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .foregroundStyle(Color.scTint)
+                        }
+                    }
                 }
             }
         }
+        .overlay(alignment: .bottom) {
+            if isSelecting {
+                selectionBar
+            }
+        }
+        .undoToast($toast)
         .onAppear {
             if !hasAppeared {
                 hasAppeared = true
@@ -75,6 +115,21 @@ struct InsightGridView: View {
         } message: {
             Text(moveAlertMessage)
         }
+        .alert("Move \(selectedIDs.count) to Trash?", isPresented: $showMoveSelectedConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Move", role: .destructive) {
+                moveSelectedToTrash()
+            }
+        } message: {
+            Text("You can review and restore them from the Trash later.")
+        }
+    }
+
+    private var sortModeBinding: Binding<InsightSortMode> {
+        Binding(
+            get: { photosService.sortMode },
+            set: { photosService.setSortMode($0) }
+        )
     }
 
     @ViewBuilder
@@ -180,24 +235,42 @@ struct InsightGridView: View {
                     LazyVGrid(columns: columns, spacing: spacing) {
                         ForEach(filteredAssets.indices, id: \.self) { filteredIndex in
                             let asset = filteredAssets[filteredIndex]
-                            let originalIndex = originalAssets.firstIndex(where: { $0.id == asset.id }) ?? filteredIndex
 
-                            NavigationLink {
-                                MediaViewerView(
-                                    assets: originalAssets,
-                                    startIndex: originalIndex,
-                                    year: Calendar.current.component(.year, from: asset.creationDate),
-                                    permissionService: permissionService
-                                )
-                            } label: {
-                                gridCell(for: asset, size: side)
-                                    .contentShape(Rectangle())
+                            if isSelecting {
+                                Button {
+                                    toggleSelection(asset.id)
+                                } label: {
+                                    gridCell(for: asset, size: side)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("insightPhoto_\(filteredIndex)")
+                            } else {
+                                let originalIndex = originalAssets.firstIndex(where: { $0.id == asset.id }) ?? filteredIndex
+
+                                NavigationLink {
+                                    MediaViewerView(
+                                        assets: originalAssets,
+                                        startIndex: originalIndex,
+                                        year: Calendar.current.component(.year, from: asset.creationDate),
+                                        permissionService: permissionService
+                                    )
+                                } label: {
+                                    gridCell(for: asset, size: side)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("insightPhoto_\(filteredIndex)")
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("insightPhoto_\(filteredIndex)")
                         }
                     }
                     .padding(.horizontal, 2)
+
+                    // Keep the last grid rows reachable above the selection bar
+                    if isSelecting {
+                        Color.clear
+                            .frame(height: 88)
+                    }
                 }
             }
         }
@@ -232,9 +305,22 @@ struct InsightGridView: View {
 
     @ViewBuilder
     private func gridCell(for asset: YearAsset, size: CGFloat) -> some View {
+        let isSelected = isSelecting && selectedIDs.contains(asset.id)
+
         ThumbnailImageView(assetID: asset.id)
             .frame(width: size, height: size)
             .clipped()
+            .overlay {
+                if isSelected {
+                    Color.scTint.opacity(0.18)
+                }
+            }
+            .overlay(alignment: .bottomLeading) {
+                if isSelecting {
+                    selectionCheck(isSelected: isSelected)
+                        .padding(4)
+                }
+            }
             .overlay(alignment: .topLeading) {
                 if let groupTag = duplicateGroupTag(for: asset.id) {
                     insightChip(groupTag, tint: .scInfo)
@@ -277,6 +363,112 @@ struct InsightGridView: View {
         let minutes = Int(duration) / 60
         let seconds = Int(duration) % 60
         return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    // MARK: - Selection
+
+    private func selectionCheck(isSelected: Bool) -> some View {
+        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+            .font(.system(size: 20, weight: .semibold))
+            .foregroundStyle(isSelected ? Color.scTint : .white.opacity(0.9))
+            .background(
+                Circle()
+                    .fill(isSelected ? Color.white : Color.black.opacity(0.3))
+                    .padding(1)
+            )
+    }
+
+    private var selectionBar: some View {
+        let selectedBytes = photosService.totalBytes(for: selectedIDs)
+
+        return HStack(spacing: Spacing.sm) {
+            Button(allVisibleSelected ? "Deselect All" : "Select All") {
+                if allVisibleSelected {
+                    selectedIDs.removeAll()
+                } else {
+                    selectedIDs = Set(visibleAssets.map(\.id))
+                }
+            }
+            .font(Typography.subheadline)
+            .foregroundStyle(Color.scTint)
+
+            Spacer()
+
+            if selectedIDs.isEmpty {
+                Text("Select items")
+                    .font(Typography.subheadline)
+                    .foregroundStyle(Color.scTextSecondary)
+            } else {
+                Text("\(selectedIDs.count) · \(formattedSize(selectedBytes))")
+                    .font(Typography.subheadline)
+                    .foregroundStyle(Color.scTextPrimary)
+                    .monospacedDigit()
+            }
+
+            Button {
+                showMoveSelectedConfirmation = true
+            } label: {
+                HStack(spacing: Spacing.xxs) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("Trash")
+                        .font(Typography.subheadline.weight(.semibold))
+                }
+                .foregroundStyle(selectedIDs.isEmpty ? Color.scTextDisabled : Color.scDestructive)
+            }
+            .disabled(selectedIDs.isEmpty)
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.vertical, Spacing.sm)
+        .scControlSurface()
+        .padding(.horizontal, Spacing.md)
+        .padding(.bottom, Spacing.sm)
+    }
+
+    private var allVisibleSelected: Bool {
+        let visibleIDs = Set(visibleAssets.map(\.id))
+        return !visibleIDs.isEmpty && visibleIDs.isSubset(of: selectedIDs)
+    }
+
+    private func toggleSelection(_ assetID: String) {
+        if selectedIDs.contains(assetID) {
+            selectedIDs.remove(assetID)
+        } else {
+            selectedIDs.insert(assetID)
+        }
+    }
+
+    private func moveSelectedToTrash() {
+        // Only currently visible assets can be moved (stale selections are dropped)
+        let visibleSelected = visibleAssets.map(\.id).filter { selectedIDs.contains($0) }
+        guard !visibleSelected.isEmpty else { return }
+
+        for id in visibleSelected {
+            trashService.trash(id)
+        }
+
+        toast = ToastData(message: "Moved \(visibleSelected.count) to Trash (not deleted)") {
+            trashService.restoreMultiple(Set(visibleSelected))
+        }
+        exitSelectionMode()
+    }
+
+    private func exitSelectionMode() {
+        isSelecting = false
+        selectedIDs.removeAll()
+    }
+
+    private func formattedSize(_ bytes: Int64) -> String {
+        let mb = Double(bytes) / 1_048_576
+        let gb = Double(bytes) / 1_073_741_824
+
+        if gb >= 1.0 {
+            return String(format: "%.1f GB", gb)
+        } else if mb >= 0.1 {
+            return String(format: "%.1f MB", mb)
+        } else {
+            return "< 0.1 MB"
+        }
     }
 
     private func moveAllVisibleToTrash() {

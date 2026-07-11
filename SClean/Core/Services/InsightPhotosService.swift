@@ -30,6 +30,36 @@ nonisolated enum InsightPhotosState: Equatable, Sendable {
     }
 }
 
+// MARK: - Insight Sort Mode
+
+nonisolated enum InsightSortMode: String, CaseIterable, Identifiable, Sendable {
+    case largestFirst = "Largest First"
+    case newestFirst = "Newest First"
+    case oldestFirst = "Oldest First"
+
+    nonisolated var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .largestFirst: return "arrow.down.circle"
+        case .newestFirst: return "calendar.badge.clock"
+        case .oldestFirst: return "calendar"
+        }
+    }
+
+    /// Size-driven insights open sorted by size — the most useful order for
+    /// a storage-cleanup flow; review-driven ones open oldest first.
+    static func defaultMode(for category: InsightCategory) -> InsightSortMode {
+        switch category {
+        case .largeVideos, .largePhotos, .heavyOldVideos, .screenRecordings:
+            return .largestFirst
+        case .exactDuplicates, .similarShots, .receipts, .chatMemeDump,
+             .shortVideos, .lowQuality, .oldScreenshots:
+            return .oldestFirst
+        }
+    }
+}
+
 // MARK: - Insight Photos Service
 
 @MainActor
@@ -38,15 +68,22 @@ final class InsightPhotosService: ObservableObject {
     let category: InsightCategory
 
     @Published private(set) var state: InsightPhotosState = .idle
+    @Published private(set) var sortMode: InsightSortMode
     @Published private(set) var exactDuplicateGroupByAssetID: [String: Int] = [:]
     @Published private(set) var exactDuplicateDeletableIDs: Set<String> = []
     @Published private(set) var exactDuplicateKeeperIDs: Set<String> = []
 
+    /// byteSize lookup for the loaded assets (drives size sorting and the
+    /// selection total in the grid)
+    @Published private(set) var byteSizeByID: [String: Int64] = [:]
+
     private let snapshot: LibraryIndexSnapshot?
+    private var loadedAssets: [YearAsset] = []
 
     init(category: InsightCategory, snapshot: LibraryIndexSnapshot?) {
         self.category = category
         self.snapshot = snapshot
+        self.sortMode = InsightSortMode.defaultMode(for: category)
     }
 
     // MARK: - Public Methods
@@ -141,10 +178,46 @@ final class InsightPhotosService: ObservableObject {
             }.value
         }
 
+        var sizeIndex: [String: Int64] = [:]
+        sizeIndex.reserveCapacity(snapshot.assets.count)
+        for indexed in snapshot.assets {
+            sizeIndex[indexed.id] = indexed.byteSize
+        }
+        byteSizeByID = sizeIndex
+        loadedAssets = assets
+
         if assets.isEmpty {
             state = .empty
         } else {
-            state = .loaded(assets)
+            state = .loaded(sortedForDisplay(assets))
+        }
+    }
+
+    /// Change the display order. Duplicates keep their group ordering.
+    func setSortMode(_ mode: InsightSortMode) {
+        guard mode != sortMode, category != .exactDuplicates else { return }
+        sortMode = mode
+        if case .loaded = state {
+            state = .loaded(sortedForDisplay(loadedAssets))
+        }
+    }
+
+    /// Total byte size of the given asset IDs (for the selection bar)
+    func totalBytes(for assetIDs: some Sequence<String>) -> Int64 {
+        assetIDs.reduce(Int64(0)) { $0 + (byteSizeByID[$1] ?? 0) }
+    }
+
+    private func sortedForDisplay(_ assets: [YearAsset]) -> [YearAsset] {
+        // Exact duplicates are ordered by group; re-sorting would interleave them
+        guard category != .exactDuplicates else { return assets }
+
+        switch sortMode {
+        case .largestFirst:
+            return assets.sorted { (byteSizeByID[$0.id] ?? 0) > (byteSizeByID[$1.id] ?? 0) }
+        case .newestFirst:
+            return assets.sorted { $0.creationDate > $1.creationDate }
+        case .oldestFirst:
+            return assets.sorted { $0.creationDate < $1.creationDate }
         }
     }
 
@@ -238,6 +311,8 @@ final class InsightPhotosService: ObservableObject {
             )
         }
 
-        return results.sorted { $0.creationDate < $1.creationDate }
+        // Preserve the requested order — display sorting is applied by the
+        // caller (and duplicate groups must stay contiguous)
+        return results
     }
 }
