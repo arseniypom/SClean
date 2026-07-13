@@ -7,6 +7,33 @@
 
 import SwiftUI
 
+// MARK: - Zoom Navigation Transition (iOS 18+)
+//
+// Grid cells zoom into the full-screen viewer like the system Photos app.
+// No-ops below iOS 18 (regular push).
+
+extension View {
+    /// Apply to the NavigationLink LABEL (the grid cell)
+    @ViewBuilder
+    func scZoomSource(id: some Hashable, in namespace: Namespace.ID) -> some View {
+        if #available(iOS 18.0, *) {
+            self.matchedTransitionSource(id: id, in: namespace)
+        } else {
+            self
+        }
+    }
+
+    /// Apply to the navigation DESTINATION (the viewer)
+    @ViewBuilder
+    func scZoomTransition(sourceID: some Hashable, in namespace: Namespace.ID) -> some View {
+        if #available(iOS 18.0, *) {
+            self.navigationTransition(.zoom(sourceID: sourceID, in: namespace))
+        } else {
+            self
+        }
+    }
+}
+
 // MARK: - Surface Styles
 //
 // Per Liquid Glass rules:

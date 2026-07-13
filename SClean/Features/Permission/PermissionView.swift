@@ -111,7 +111,7 @@ struct PermissionView: View {
                     .font(Typography.title1)
                     .foregroundStyle(Color.scTextPrimary)
                 
-                Text("SlideClean needs access to your photos to help you organize and clean your library. Please enable access in Settings.")
+                Text("SClean needs access to your photos to help you organize and clean your library. Please enable access in Settings.")
                     .font(Typography.body)
                     .foregroundStyle(Color.scTextSecondary)
                     .multilineTextAlignment(.center)

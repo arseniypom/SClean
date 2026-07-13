@@ -129,7 +129,13 @@ struct MediaViewerView: View {
         DeckPagerView(
             deckModel: deckModel,
             onTrashCommitted: { removed in
-                toast = ToastData(message: "Moved to Trash (not deleted)") {
+                // The removed asset was the current one when the swipe started,
+                // so its fetched size is still in currentAssetSize
+                let removedSize = currentAssetSize
+                toast = ToastData(
+                    message: "Moved to Trash (not deleted)",
+                    sizeText: removedSize.map { formattedSize($0) }
+                ) {
                     withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                         deckModel.restore(removed)
                     }

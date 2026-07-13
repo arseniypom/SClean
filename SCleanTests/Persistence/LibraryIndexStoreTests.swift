@@ -492,7 +492,9 @@ struct LibraryIndexStoreTests {
         ]
         let snapshot = TestFactory.librarySnapshot(assets: assets)
 
-        #expect(snapshot.assets(for: .screenRecordings).map(\.id) == ["big-rec", "small-rec"])
+        // .screenRecordings exists in both TypeCategory and InsightCategory —
+        // spell out the insight overload (size-sorted, favorites excluded)
+        #expect(snapshot.assets(for: InsightCategory.screenRecordings).map(\.id) == ["big-rec", "small-rec"])
     }
 
     @Test func snapshot_insightBuckets_includesScreenRecordingsAndGatesOldScreenshots() {

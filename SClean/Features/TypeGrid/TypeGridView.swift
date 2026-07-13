@@ -15,6 +15,7 @@ struct TypeGridView: View {
     @StateObject private var photosService: TypePhotosService
     @ObservedObject private var trashService = TrashService.shared
     @State private var hasAppeared = false
+    @Namespace private var zoomNamespace
 
     // Grid layout: 3 columns with small spacing
     private let columns = [
@@ -157,9 +158,11 @@ struct TypeGridView: View {
                                     year: Calendar.current.component(.year, from: asset.creationDate),
                                     permissionService: permissionService
                                 )
+                                .scZoomTransition(sourceID: asset.id, in: zoomNamespace)
                             } label: {
                                 gridCell(for: asset, size: side)
                                     .contentShape(Rectangle())
+                                    .scZoomSource(id: asset.id, in: zoomNamespace)
                             }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("gridPhoto_\(filteredIndex)")

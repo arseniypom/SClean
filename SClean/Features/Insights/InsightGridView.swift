@@ -21,6 +21,7 @@ struct InsightGridView: View {
     @State private var selectedIDs: Set<String> = []
     @State private var showMoveSelectedConfirmation = false
     @State private var toast: ToastData?
+    @Namespace private var zoomNamespace
 
     private enum DuplicateRole {
         case keeper
@@ -255,9 +256,11 @@ struct InsightGridView: View {
                                         year: Calendar.current.component(.year, from: asset.creationDate),
                                         permissionService: permissionService
                                     )
+                                    .scZoomTransition(sourceID: asset.id, in: zoomNamespace)
                                 } label: {
                                     gridCell(for: asset, size: side)
                                         .contentShape(Rectangle())
+                                        .scZoomSource(id: asset.id, in: zoomNamespace)
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityIdentifier("insightPhoto_\(filteredIndex)")
@@ -443,11 +446,16 @@ struct InsightGridView: View {
         let visibleSelected = visibleAssets.map(\.id).filter { selectedIDs.contains($0) }
         guard !visibleSelected.isEmpty else { return }
 
+        let movedBytes = photosService.totalBytes(for: Set(visibleSelected))
+
         for id in visibleSelected {
             trashService.trash(id)
         }
 
-        toast = ToastData(message: "Moved \(visibleSelected.count) to Trash (not deleted)") {
+        toast = ToastData(
+            message: "Moved \(visibleSelected.count) to Trash (not deleted)",
+            sizeText: movedBytes > 0 ? formattedSize(movedBytes) : nil
+        ) {
             trashService.restoreMultiple(Set(visibleSelected))
         }
         exitSelectionMode()

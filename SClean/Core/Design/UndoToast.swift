@@ -9,14 +9,15 @@ import SwiftUI
 
 struct UndoToast: View {
     let message: String
+    var sizeText: String? = nil
     let onUndo: () -> Void
     let onDismiss: () -> Void
-    
+
     @State private var isVisible = false
-    
+
     /// Auto-dismiss duration in seconds
     private let dismissDelay: TimeInterval = 4.0
-    
+
     var body: some View {
         HStack(spacing: Spacing.md) {
             // Trash icon
@@ -24,11 +25,21 @@ struct UndoToast: View {
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(Color.scTextSecondary)
 
-            // Message
-            Text(message)
-                .font(Typography.callout)
-                .foregroundStyle(Color.scTextPrimary)
-            
+            // Message, with the reclaimed size as the convincing detail
+            HStack(spacing: Spacing.xs) {
+                Text(message)
+                    .font(Typography.callout)
+                    .foregroundStyle(Color.scTextPrimary)
+
+                if let sizeText {
+                    Text(sizeText)
+                        .font(Typography.callout.weight(.semibold))
+                        .foregroundStyle(Color.scTextSecondary)
+                        .monospacedDigit()
+                }
+            }
+            .lineLimit(1)
+
             Spacer()
             
             // Undo button
@@ -98,6 +109,7 @@ struct ToastContainerModifier: ViewModifier {
             if let toast {
                 UndoToast(
                     message: toast.message,
+                    sizeText: toast.sizeText,
                     onUndo: {
                         toast.onUndo()
                         self.toast = nil
@@ -120,11 +132,13 @@ struct ToastContainerModifier: ViewModifier {
 struct ToastData: Equatable {
     let id: UUID
     let message: String
+    let sizeText: String?
     let onUndo: () -> Void
-    
-    init(message: String, onUndo: @escaping () -> Void) {
+
+    init(message: String, sizeText: String? = nil, onUndo: @escaping () -> Void) {
         self.id = UUID()
         self.message = message
+        self.sizeText = sizeText
         self.onUndo = onUndo
     }
     

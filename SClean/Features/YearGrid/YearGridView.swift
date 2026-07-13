@@ -15,6 +15,7 @@ struct YearGridView: View {
     @StateObject private var photosService: YearPhotosService
     @ObservedObject private var trashService = TrashService.shared
     @State private var hasAppeared = false
+    @Namespace private var zoomNamespace
     @AppStorage(SortOrder.storageKey) private var sortOrderRaw: String = SortOrder.newestFirst.rawValue
 
     private var sortOrder: SortOrder {
@@ -173,9 +174,11 @@ struct YearGridView: View {
                                     year: year,
                                     permissionService: permissionService
                                 )
+                                .scZoomTransition(sourceID: asset.id, in: zoomNamespace)
                             } label: {
                                 gridCell(for: asset, size: side)
                                     .contentShape(Rectangle())
+                                    .scZoomSource(id: asset.id, in: zoomNamespace)
                             }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("gridPhoto_\(filteredIndex)")

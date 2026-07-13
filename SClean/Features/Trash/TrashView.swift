@@ -298,6 +298,10 @@ struct TrashViewWithNavigation: View {
     @State private var showResult = false
     @State private var showSuccessEmptyState = false
     @State private var showRestoreAllConfirmation = false
+
+    // Payoff: bytes freed by the last successful Empty Trash
+    @State private var lastFreedBytes: Int64 = 0
+    @State private var shownFreedBytes: Int64 = 0
     
     private let columns = [
         GridItem(.flexible(), spacing: 2),
@@ -510,11 +514,46 @@ struct TrashViewWithNavigation: View {
                 .font(.system(size: 56, weight: .light))
                 .foregroundStyle(Color.scSuccess)
 
-            Text("Trash Emptied")
-                .font(Typography.title3)
-                .foregroundStyle(Color.scTextPrimary)
+            VStack(spacing: Spacing.xs) {
+                Text("Trash Emptied")
+                    .font(Typography.title3)
+                    .foregroundStyle(Color.scTextPrimary)
+
+                // The payoff: how much space this cleanup actually freed
+                if lastFreedBytes > 0 {
+                    Text("\(formattedFreedSize(shownFreedBytes)) freed")
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .foregroundStyle(Color.scTextPrimary)
+                        .contentTransition(.numericText(value: Double(shownFreedBytes)))
+                }
+            }
         }
         .padding(Spacing.xl)
+        .onAppear {
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            withAnimation(.spring(response: 0.9, dampingFraction: 0.9)) {
+                shownFreedBytes = lastFreedBytes
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            lastFreedBytes > 0
+                ? "Trash emptied. Freed \(formattedFreedSize(lastFreedBytes))."
+                : "Trash emptied"
+        )
+    }
+
+    private func formattedFreedSize(_ bytes: Int64) -> String {
+        let gb = Double(bytes) / 1_073_741_824
+        let mb = Double(bytes) / 1_048_576
+
+        if gb >= 1.0 {
+            return String(format: "%.1f GB", gb)
+        } else if mb >= 1.0 {
+            return String(format: "%.1f MB", mb)
+        } else {
+            return "< 1 MB"
+        }
     }
 
     // MARK: - Floating Action Bar
@@ -712,6 +751,8 @@ struct TrashViewWithNavigation: View {
             // Handle result based on outcome
             if result.isFullSuccess {
                 // Show inline success state instead of modal
+                lastFreedBytes = totalBytes
+                shownFreedBytes = 0
                 showSuccessEmptyState = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                     withAnimation(.easeOut(duration: 0.5)) {

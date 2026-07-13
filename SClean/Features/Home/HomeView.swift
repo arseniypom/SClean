@@ -292,6 +292,9 @@ struct HomeView: View {
             
             Text("\(trashService.trashCount)")
                 .font(.system(size: 16, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+                .animation(.snappy, value: trashService.trashCount)
         }
         .foregroundStyle(Color.scTextPrimary)
         .padding(.horizontal, Spacing.md)
